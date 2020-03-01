@@ -19,6 +19,7 @@ typedef struct future {
     void *result;
     event_loop *loop;
     void (*init)(struct future *,event_loop *);
+    void (*destruct)(struct future *);
     int (*cancel)(struct future *);
     int (*canceled)(struct future *);
     int (*done)(struct future *);
@@ -29,5 +30,8 @@ typedef struct future {
     void (*set_error)(struct future *, future_error);
     future_error (*get_error)(struct future *);
 } future;
+
+future *alloc_future(event_loop *ev);
+void free_future(future *future);
 
 #endif

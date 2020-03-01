@@ -6,25 +6,24 @@
 #include "event_loop.h"
 #include "future.h"
 
-void event_loop_destruct(event_loop *ev);
-uint64_t event_loop_new_source_id_thread_safe(event_loop *ev);
-future * event_loop_create_future(event_loop *ev);
-uint64_t event_loop_add_child_watch(event_loop *ev);
-uint64_t event_loop_add_idle(event_loop *ev);
-uint64_t event_loop_add_timeout(event_loop *ev);
-uint64_t event_loop_add_reader(event_loop *ev);
-uint64_t event_loop_remove_reader(event_loop *ev);
-uint64_t event_loop_add_writer(event_loop *ev);
-uint64_t event_loop_remove_writer(event_loop *ev);
-uint64_t event_loop_add_io_watch(event_loop *ev);
-uint64_t event_loop_remove_source(event_loop *ev);
-uint64_t event_loop_run_until_complete(event_loop *ev, future *future);
-uint64_t event_loop_call_soon(event_loop *ev);
-uint64_t event_loop_call_later(event_loop *ev);
-uint64_t event_loop_call_at(event_loop *ev);
+static void event_loop_destruct(event_loop *ev);
+static uint64_t event_loop_new_source_id_thread_safe(event_loop *ev);
+static future * event_loop_create_future(event_loop *ev);
+static uint64_t event_loop_add_child_watch(event_loop *ev);
+static uint64_t event_loop_add_idle(event_loop *ev);
+static uint64_t event_loop_add_timeout(event_loop *ev);
+static uint64_t event_loop_add_reader(event_loop *ev);
+static uint64_t event_loop_remove_reader(event_loop *ev);
+static uint64_t event_loop_add_writer(event_loop *ev);
+static uint64_t event_loop_remove_writer(event_loop *ev);
+static uint64_t event_loop_add_io_watch(event_loop *ev);
+static uint64_t event_loop_remove_source(event_loop *ev);
+static uint64_t event_loop_run_until_complete(event_loop *ev, future *future);
+static uint64_t event_loop_call_soon(event_loop *ev);
+static uint64_t event_loop_call_later(event_loop *ev);
+static uint64_t event_loop_call_at(event_loop *ev);
 
-
-int event_loop_init(struct event_loop *ev){
+static int event_loop_init(struct event_loop *ev){
     int fd = epoll_create(1);
     if(fd < 0){
         return -1;
@@ -53,12 +52,12 @@ int event_loop_init(struct event_loop *ev){
     ev->call_at = event_loop_call_at;
     return 0;
 }
-void event_loop_destruct(struct event_loop *ev){
+static void event_loop_destruct(struct event_loop *ev){
     close(ev->epoll_fd);
     pthread_mutex_destroy(ev->mutex);
     free(ev->mutex);
 }
-uint64_t event_loop_new_source_id_thread_safe(event_loop *ev){
+static uint64_t event_loop_new_source_id_thread_safe(event_loop *ev){
     pthread_mutex_lock(ev->mutex);
     (ev->source_id)++;
     if(ev->source_id == 0){
@@ -67,46 +66,47 @@ uint64_t event_loop_new_source_id_thread_safe(event_loop *ev){
     pthread_mutex_unlock(ev->mutex);
     return ev->source_id;
 }
-future * event_loop_create_future(event_loop *ev){
+static future * event_loop_create_future(event_loop *ev){
+    future * future = alloc_future(ev);
+    return future;
+}
+static uint64_t event_loop_add_child_watch(event_loop *ev){
 
 }
-uint64_t event_loop_add_child_watch(event_loop *ev){
+static uint64_t event_loop_add_idle(event_loop *ev){
 
 }
-uint64_t event_loop_add_idle(event_loop *ev){
+static uint64_t event_loop_add_timeout(event_loop *ev){
 
 }
-uint64_t event_loop_add_timeout(event_loop *ev){
+static uint64_t event_loop_add_reader(event_loop *ev){
 
 }
-uint64_t event_loop_add_reader(event_loop *ev){
+static uint64_t event_loop_remove_reader(event_loop *ev){
 
 }
-uint64_t event_loop_remove_reader(event_loop *ev){
+static uint64_t event_loop_add_writer(event_loop *ev){
 
 }
-uint64_t event_loop_add_writer(event_loop *ev){
+static uint64_t event_loop_remove_writer(event_loop *ev){
 
 }
-uint64_t event_loop_remove_writer(event_loop *ev){
+static uint64_t event_loop_add_io_watch(event_loop *ev){
 
 }
-uint64_t event_loop_add_io_watch(event_loop *ev){
+static uint64_t event_loop_remove_source(event_loop *ev){
 
 }
-uint64_t event_loop_remove_source(event_loop *ev){
+static uint64_t event_loop_run_until_complete(event_loop *ev, future *future){
 
 }
-uint64_t event_loop_run_until_complete(event_loop *ev, future *future){
+static uint64_t event_loop_call_soon(event_loop *ev){
 
 }
-uint64_t event_loop_call_soon(event_loop *ev){
+static uint64_t event_loop_call_later(event_loop *ev){
 
 }
-uint64_t event_loop_call_later(event_loop *ev){
-
-}
-uint64_t event_loop_call_at(event_loop *ev){
+static uint64_t event_loop_call_at(event_loop *ev){
 
 }
 event_loop *alloc_event_loop(){

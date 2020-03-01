@@ -26,4 +26,8 @@ typedef struct event_loop {
     uint64_t (*call_later)(struct event_loop *);
     uint64_t (*call_at)(struct event_loop *);
 } event_loop;
+
+event_loop *alloc_event_loop();
+void free_event_loop(event_loop *ev);
+
 #endif

@@ -1,12 +1,38 @@
+#include <stdlib.h>
 #include "future.h"
-void future_init(struct future *future, struct event_loop *ev){
+#include "event_loop.h"
+
+static void future_init(future *future, event_loop *ev);
+static void future_destruct(future *future);
+static int future_cancel(future *future);
+static int future_canceled(future *future);
+static int future_done(future *future);
+static void * future_get_result(future *future, future_error *error);
+static future_error future_get_error(future *future);
+static int future_set_error(future *future, future_error error, future_error *errinfo);
+future * alloc_future(event_loop *ev);
+void free_future(future *future);
+
+future * alloc_future(event_loop *ev){
+    future *future = calloc(1,sizeof(future));
+    future->init = future_init;
+    future->init(future, ev);
+    return future;
+}
+
+void free_future(future *future){
+    future->destruct(future);
+    free(future);
+}
+
+static void future_init(future *future, event_loop *ev){
     future->loop = ev;
     future->state = FUTURE_STATE_PENDING;
     future->error = FUTURE_ERROR_NOERROR;
     future->result = NULL;
 }
 
-int future_cancel(struct future *future){
+static int future_cancel(future *future){
     if(future->state != FUTURE_STATE_PENDING){
         return 0;
     }
@@ -14,7 +40,7 @@ int future_cancel(struct future *future){
     return 1;
 }
 
-int future_canceled(struct future *future){
+static int future_canceled(future *future){
     if(future->state == FUTURE_STATE_CANCELED){
         return 1;
     } else {
@@ -22,7 +48,7 @@ int future_canceled(struct future *future){
     }
 }
 
-int future_done(struct future *future){
+static int future_done(future *future){
     if(future->state != FUTURE_STATE_PENDING){
         return 1;
     } else {
@@ -30,7 +56,7 @@ int future_done(struct future *future){
     }
 }
 
-void * future_get_result(struct future *future, enum future_error *error){
+static void * future_get_result(future *future, future_error *error){
     if(future->state == FUTURE_STATE_CANCELED){
         *error = FUTURE_ERROR_CANCELED;
         return NULL;
@@ -46,11 +72,11 @@ void * future_get_result(struct future *future, enum future_error *error){
     return future->result;
 }
 
-enum future_error future_get_error(struct future *future){
+static future_error future_get_error(future *future){
     return future->error;
 }
 
-int future_set_error(struct future *future, enum future_error error, enum future_error *errinfo){
+static int future_set_error(future *future, future_error error, future_error *errinfo){
     if(future->state != FUTURE_STATE_PENDING){
         *errinfo = FUTURE_ERROR_INVALID_STATE; 
         return 0; 
