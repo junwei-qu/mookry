@@ -10,7 +10,7 @@ struct hlist_node {
 };
 
 #define HLIST_HEAD_INIT { .first = NULL }
-#define HLIST_HEAD(name) struct hlist_head name = {  .first = NULL }
+#define HLIST_HEAD(name) struct hlist_head name = { .first = NULL }
 #define INIT_HLIST_HEAD(ptr) ((ptr)->first = NULL)
 #define INIT_HLIST_NODE(ptr) ((ptr)->next = NULL, (ptr)->pprev = NULL)
 
@@ -40,18 +40,28 @@ static inline void hlist_add_head(struct hlist_node *n, struct hlist_head *h) {
     n->pprev = &h->first;
 }
 
+#define container_of(ptr, type, member) ({\
+    const typeof( ((type *)0)->member ) *__mptr = (ptr); \
+    (type *)((char *)__mptr - offsetof(type,member));})
+
 #define hlist_entry(ptr, type, member) container_of(ptr,type,member)
 
-#define hlist_for_each(pos, head) for (pos = (head)->first;pos;pos = pos->next)
+#define hlist_for_each(pos, head) for(pos = (head)->first;pos;pos = pos->next)
 
-#define hlist_for_each_safe(pos, n, head) for (pos = (head)->first; pos && ({ n = pos->next; 1; });pos = n)
+#define hlist_for_each_safe(pos, n, head) for(pos = (head)->first; pos && ({ n = pos->next; 1; });pos = n)
 
-#define hlist_for_each_entry(tpos, pos, head, member) for (pos = (head)->first;pos && ({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;});pos = pos->next)
+#define hlist_for_each_entry(tpos, pos, head, member) for(pos = (head)->first;pos && ({ \
+    tpos = hlist_entry(pos, typeof(*tpos), member); 1;});\
+    pos = pos->next)
 
-#define hlist_for_each_entry_continue(tpos, pos, member) for (pos = (pos)->next;pos && ({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;});pos = pos->next)
+#define hlist_for_each_entry_continue(tpos, pos, member) for(pos = (pos)->next;pos && ({ \
+    tpos = hlist_entry(pos, typeof(*tpos), member); 1;});\
+    pos = pos->next)
 
-#define hlist_for_each_entry_from(tpos, pos, member) for (; pos && ({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;});pos = pos->next)
+#define hlist_for_each_entry_from(tpos, pos, member) for(; pos && ({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;});pos = pos->next)
 
-#define hlist_for_each_entry_safe(tpos, pos, n, head, member) 	for (pos = (head)->first;pos && ({ n = pos->next; 1; }) && ({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;});pos = n)
+#define hlist_for_each_entry_safe(tpos, pos, n, head, member) 	for(pos = (head)->first;pos && ({ n = pos->next; 1; }) \
+    && ({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;});\
+    pos = n)
 
 #endif
