@@ -14,12 +14,13 @@ static void * future_get_result(future *future);
 static int future_set_result(future *future ,void *result);
 static future_error future_get_error(future *future);
 static void future_set_error(future *future, future_error error);
-static void future_add_done_callback(future *future, void (*callback)(struct future *, void *));
+static void future_add_done_callback(future *future, void (*callback)(struct future *, void *), void *arg);
 static void future_remove_done_callback(future *future, void (*callback)(struct future*, void *));
 
 struct done_callback_entry {
     struct list_head list_head;
     void (*callback)(struct future *, void*); 
+    void *arg;
 };
 
 future * alloc_future(event_loop *ev){ 
@@ -53,6 +54,10 @@ static void future_init(future *future, event_loop *ev){
 }
 
 static void future_destruct(future *future) {
+    struct done_callback_entry *pos, *tmp;
+    list_for_each_entry_safe(pos,tmp,&future->callback_head,list_head) {
+        free(pos);
+    }
     
 }
 
@@ -95,6 +100,10 @@ static int future_set_result(future *future, void *result){
 	return -1; 
     } 
     future->result = result;
+    struct done_callback_entry *pos;
+    list_for_each_entry(pos,&future->callback_head,list_head){
+        pos->callback(future,pos->arg);
+    }
     return 0; 
 }
 
@@ -106,9 +115,10 @@ static void future_set_error(future *future, future_error error){
     future->error = error; 
 }
 
-static void future_add_done_callback(future *future, void (*callback)(struct future *, void *)) {
+static void future_add_done_callback(future *future, void (*callback)(struct future *, void *), void *arg) {
     struct done_callback_entry *entry = calloc(1, sizeof(struct done_callback_entry));
     entry->callback = callback;
+    entry->arg = arg;
     list_add_before(&future->callback_head, &entry->list_head);
 }
 

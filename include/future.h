@@ -25,7 +25,7 @@ typedef struct future {
     int (*cancel)(struct future *);
     int (*canceled)(struct future *);
     int (*done)(struct future *);
-    void (*add_done_callback)(struct future *, void (*)(struct future *, void *));
+    void (*add_done_callback)(struct future *, void (*)(struct future *, void *), void *);
     void (*remove_done_callback)(struct future *, void (*)(struct future*, void *));
     int (*set_result)(struct future *, void *);
     void *(*get_result)(struct future *);

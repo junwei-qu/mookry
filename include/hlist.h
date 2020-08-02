@@ -1,6 +1,8 @@
 #ifndef _HLIST_H
 #define _HLIST_H
 
+#include <stddef.h>
+
 struct hlist_head {
     struct hlist_node *first;
 };
