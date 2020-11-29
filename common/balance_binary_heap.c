@@ -8,7 +8,7 @@ void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_h
 void *heap_pop_value(struct balance_binary_heap *heap);
 void *heap_peek_value(struct balance_binary_heap *heap);
 
-struct balance_binary_heap * alloc_heap(int (*cmp_key)(void *, void *)){
+struct balance_binary_heap * alloc_heap(int (*cmp_key)(const void *, const void *)){
     struct balance_binary_heap *heap = malloc(sizeof(struct balance_binary_heap));
     INIT_LIST_HEAD(&(heap->list_head));
     heap->root = NULL;
@@ -99,7 +99,7 @@ struct balance_binary_heap_value* heap_insert_value(struct balance_binary_heap *
 	    } else {
 	        node->parent = parent_node;
                 node->value = parent_value;
-		node->value->node = node;
+		parent_value->node = node;
 		if(is_left_node){
 	            parent_node->left = node;
 		} else {
@@ -139,15 +139,16 @@ void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_h
         heap->root = NULL;
 	return;
     }
+    if(parent_node->left == delete_node) {
+        parent_node->left = NULL;
+    } else {
+        parent_node->right = NULL;
+    }
     if(delete_node == node){
-        if(parent_node->left == delete_node) {
-            parent_node->left = NULL;
-	} else {
-            parent_node->right = NULL;
-	}
 	return;
     }
     node->value = delete_value;
+    delete_value->node = node;
     if(node->parent && heap->cmp_key(node->value->pointer, node->parent->value->pointer) > 0){
         for(;;){
             max_node = node;
@@ -159,7 +160,9 @@ void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_h
             } else {
                 tmp_value = node->value;
     	        node->value = node->parent->value;
+		node->value->node = node;
     	        node->parent->value = tmp_value;
+		tmp_value->node = node->parent;
     	        node = node->parent;
             }
         }
@@ -179,12 +182,16 @@ void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_h
             } else if(is_left_node){
                 tmp_value = node->value;
                 node->value = node->left->value;
+		node->value->node = node;
         	node->left->value = tmp_value;
+	        tmp_value->node = node->left;
         	node = node->left;
             } else {
                 tmp_value = node->value;
         	node->value = node->right->value;
+		node->value->node = node;
         	node->right->value = tmp_value;
+		tmp_value->node = node->right;
         	node = node->right;
             }
         }
