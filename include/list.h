@@ -77,9 +77,11 @@ static inline void list_join(struct list_head *list, struct list_head *head) {
     }
 }
 
+#ifndef container_of
 #define container_of(ptr, type, member) ({\
     const typeof( ((type *)0)->member ) *__mptr = (ptr); \
-    (type *)((char *)__mptr - offsetof(type,member));})
+    (type *)((char *)__mptr - offsetof(type, member));})
+#endif
 
 #define list_entry(ptr, type, member)  container_of(ptr, type, member)
 
