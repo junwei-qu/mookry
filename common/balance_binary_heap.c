@@ -1,16 +1,15 @@
 #include <stdlib.h>
-#include "list.h"
 #include "balance_binary_heap.h"
 #define BALANCE_BINARY_HEAP_SIGN 0x11223344
 
-struct balance_binary_heap_value* heap_insert_value(struct balance_binary_heap *heap, void *pointer);
-void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_heap_value *value);
-void *heap_pop_value(struct balance_binary_heap *heap);
-void *heap_peek_value(struct balance_binary_heap *heap);
+static struct balance_binary_heap_value* heap_insert_value(struct balance_binary_heap *heap, void *pointer);
+static void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_heap_value *value);
+static void *heap_pop_value(struct balance_binary_heap *heap);
+static void *heap_peek_value(struct balance_binary_heap *heap);
+static void free_tree(struct balance_binary_heap_node *root);
 
 struct balance_binary_heap * alloc_heap(int (*cmp_key)(const void *, const void *)){
     struct balance_binary_heap *heap = malloc(sizeof(struct balance_binary_heap));
-    INIT_LIST_HEAD(&(heap->list_head));
     heap->root = NULL;
     heap->cmp_key = cmp_key;
     heap->insert_value = heap_insert_value;
@@ -21,23 +20,29 @@ struct balance_binary_heap * alloc_heap(int (*cmp_key)(const void *, const void 
 
 void free_heap(struct balance_binary_heap *heap){
     if(heap->root){
-        struct balance_binary_heap_value *pos, *next;
-        list_for_each_entry_safe(pos, next, &(heap->list_head), list_node){
-            free(pos->node);
-	    free(pos);
-	}
+        free_tree(heap->root);
     }
     free(heap);
 }
 
-struct balance_binary_heap_value* heap_insert_value(struct balance_binary_heap *heap, void *pointer) {
+static void free_tree(struct balance_binary_heap_node *root){
+    if(root->left){
+        free_tree(root->left);
+    }
+    if(root->right){
+        free_tree(root->right);
+    }
+    free(root->value);
+    free(root);
+}
+
+static struct balance_binary_heap_value* heap_insert_value(struct balance_binary_heap *heap, void *pointer) {
     struct balance_binary_heap_node* node = malloc(sizeof(struct balance_binary_heap_node));
     struct balance_binary_heap_value* value = malloc(sizeof(struct balance_binary_heap_value));
     value->pointer = pointer;
     value->sign = BALANCE_BINARY_HEAP_SIGN;
     node->parent = node->left = node->right = NULL;
     node->left_children_num = node->right_children_num = 0;
-    list_add_after(&(value->list_node), &(heap->list_head));
     if(heap->root == NULL) {
 	node->value = value;
 	value->node = node;
@@ -111,7 +116,7 @@ struct balance_binary_heap_value* heap_insert_value(struct balance_binary_heap *
     }
 }
 
-void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_heap_value *value) {
+static void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_heap_value *value) {
     struct balance_binary_heap_node *node = value->node;
     struct balance_binary_heap_node *max_node, *parent_node, *delete_node = heap->root; 
     struct balance_binary_heap_node *child_node = NULL; 
@@ -120,7 +125,6 @@ void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_h
     if(!heap->root || value->sign != BALANCE_BINARY_HEAP_SIGN){
         return;
     }
-    list_del(&(value->list_node));
     while(delete_node->left_children_num || delete_node->right_children_num){
         if(delete_node->left_children_num > delete_node->right_children_num){
 	    delete_node->left_children_num--;
@@ -198,7 +202,7 @@ void heap_delete_value(struct balance_binary_heap *heap, struct balance_binary_h
     }
 }
 
-void *heap_pop_value(struct balance_binary_heap *heap){
+static void *heap_pop_value(struct balance_binary_heap *heap){
     if(!heap->root){
         return NULL;
     }
@@ -207,7 +211,7 @@ void *heap_pop_value(struct balance_binary_heap *heap){
     return pointer;
 }
 
-void *heap_peek_value(struct balance_binary_heap *heap){
+static void *heap_peek_value(struct balance_binary_heap *heap){
     if(!heap->root){
         return NULL;
     }

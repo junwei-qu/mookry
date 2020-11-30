@@ -12,13 +12,11 @@ struct balance_binary_heap_node {
 
 struct balance_binary_heap_value {
     unsigned long sign;
-    struct list_head list_node;
     struct balance_binary_heap_node *node;
     void *pointer;
 };
 
 struct balance_binary_heap {
-    struct list_head list_head;
     struct balance_binary_heap_node *root;     
     int (*cmp_key)(const void *, const void *);
     struct balance_binary_heap_value* (*insert_value)(struct balance_binary_heap* heap, void *pointer);
