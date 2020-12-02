@@ -1,12 +1,13 @@
 #ifndef _BALANCE_BINARY_HEAP_H
 #define _BALANCE_BINARY_HEAP_H
+#include <stdint.h>
 #include "list.h"
 struct balance_binary_heap_node {
     struct balance_binary_heap_node *parent;
     struct balance_binary_heap_node *left;
     struct balance_binary_heap_node *right;
-    unsigned long left_children_num;
-    unsigned long right_children_num;
+    uint64_t left_children_num;
+    uint64_t right_children_num;
     struct balance_binary_heap_value *value;
 };
 
