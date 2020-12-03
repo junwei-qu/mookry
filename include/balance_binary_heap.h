@@ -22,6 +22,7 @@ struct balance_binary_heap {
     int (*cmp_key)(const void *, const void *);
     struct balance_binary_heap_value* (*insert_value)(struct balance_binary_heap* heap, void *pointer);
     void (*delete_value)(struct balance_binary_heap* heap, struct balance_binary_heap_value *value);
+    void (*heapify)(struct balance_binary_heap *heap, struct balance_binary_heap_value *value);
     void *(*pop_value)(struct balance_binary_heap* heap);
     void *(*peek_value)(struct balance_binary_heap* heap);
 };
