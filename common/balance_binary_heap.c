@@ -132,7 +132,7 @@ static void heapify(struct balance_binary_heap *heap, struct balance_binary_heap
             if(node->parent && heap->cmp_key(max_node->value->pointer, node->parent->value->pointer) < 0){
                 max_node = node->parent;
             }
-            if(max_node == node->parent){
+            if(!node->parent || max_node == node->parent){
                 return;
             } else {
                 tmp_value = node->value;
