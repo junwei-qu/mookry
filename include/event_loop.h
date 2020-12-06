@@ -3,11 +3,14 @@
 
 #include "hlist.h"
 #include "list.h"
+#include "balance_binary_heap.h"
 #include <pthread.h>
 #include <stdint.h>
 
-#define EVENT_LOOP_CALLBACK_HASH_SIZE 0xFFFF 
-#define EVENT_LOOP_FD_HASH_SIZE    0xFF
+#define EVENT_LOOP_CALLBACK_HASH_SIZE 65536 
+#define EVENT_LOOP_CALLBACK_HASH(source_id) ((source_id) & (EVENT_LOOP_CALLBACK_HASH_SIZE - 1))
+#define EVENT_LOOP_FD_HASH_SIZE 8192 
+#define EVENT_LOOP_FD_HASH(source_id) ((source_id) & (EVENT_LOOP_FD_HASH_SIZE - 1))
 
 enum EVENT_LOOP_CALLBACK_TYPE {
     EVENT_LOOP_CALLBACK_TYPE_READER,
@@ -24,15 +27,15 @@ enum EVENT_LOOP_TIMER_TYPE {
 };
 
 typedef struct event_loop {
-    struct hlist_head callback_hash[EVENT_LOOP_CALLBACK_HASH_SIZE];
-    struct hlist_head fd_hash[EVENT_LOOP_FD_HASH_SIZE];
+    struct hlist_head callback_hash[EVENT_LOOP_CALLBACK_HASH_SIZE+1];
+    struct hlist_head fd_hash[EVENT_LOOP_FD_HASH_SIZE+1];
     struct list_head call_soon_head;
     struct list_head signal_head;
-    struct list_head timer_head;
+    struct balance_binary_heap *timer_heap;
     uint32_t recursive_depth;
     uint64_t source_id;
     pthread_mutex_t mutex;
-    int epoll_fd;
+    int epollfd;
     int signalfd;
     int timerfd;
     void (*init)(struct event_loop *);
@@ -48,7 +51,13 @@ typedef struct event_loop {
     void (*remove_source)(struct event_loop *, uint64_t);
 } event_loop;
 
-struct event_loop_callback {
+struct timer_node {
+   struct balance_binary_heap_value *heap_value;
+   struct timespec timespec;
+   enum EVENT_LOOP_TIMER_TYPE timer_type;
+};
+
+struct event_loop_callback_node {
     struct hlist_node hlist_node;
     uint64_t source_id;
     union {
@@ -63,11 +72,7 @@ struct event_loop_callback {
            struct list_head node;
 	   int signo;
 	} signal_node;
-	struct {
-           struct list_head node;
-           struct timespec timespec;
-	   enum EVENT_LOOP_TIMER_TYPE timer_type;
-	} timer_node;
+	struct timer_node timer_node;
     } list_node;
     enum EVENT_LOOP_CALLBACK_TYPE callback_type;
     void *callback;

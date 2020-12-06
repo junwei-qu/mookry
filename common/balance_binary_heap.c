@@ -7,7 +7,7 @@ static void heap_delete_value(struct balance_binary_heap *heap, struct balance_b
 static void *heap_pop_value(struct balance_binary_heap *heap);
 static void *heap_peek_value(struct balance_binary_heap *heap);
 static void free_tree(struct balance_binary_heap_node *root);
-static void heapify(struct balance_binary_heap *heap, struct balance_binary_heap_value *value);
+static void heap_heapify(struct balance_binary_heap *heap, struct balance_binary_heap_value *value);
 
 struct balance_binary_heap *alloc_heap(int (*cmp_key)(const void *, const void *)){
     struct balance_binary_heap *heap = malloc(sizeof(struct balance_binary_heap));
@@ -17,7 +17,7 @@ struct balance_binary_heap *alloc_heap(int (*cmp_key)(const void *, const void *
     heap->delete_value = heap_delete_value;
     heap->pop_value = heap_pop_value;
     heap->peek_value = heap_peek_value;
-    heap->heapify = heapify;
+    heap->heapify = heap_heapify;
 }
 
 void free_heap(struct balance_binary_heap *heap){
@@ -118,7 +118,7 @@ static struct balance_binary_heap_value* heap_insert_value(struct balance_binary
     }
 }
 
-static void heapify(struct balance_binary_heap *heap, struct balance_binary_heap_value *value) {
+static void heap_heapify(struct balance_binary_heap *heap, struct balance_binary_heap_value *value) {
     struct balance_binary_heap_node *node = value->node;
     struct balance_binary_heap_node *max_node; 
     struct balance_binary_heap_value *tmp_value;

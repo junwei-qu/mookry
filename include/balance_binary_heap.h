@@ -1,7 +1,9 @@
 #ifndef _BALANCE_BINARY_HEAP_H
 #define _BALANCE_BINARY_HEAP_H
+
 #include <stdint.h>
 #include "list.h"
+
 struct balance_binary_heap_node {
     struct balance_binary_heap_node *parent;
     struct balance_binary_heap_node *left;
