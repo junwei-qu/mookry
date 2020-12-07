@@ -168,23 +168,32 @@ static void event_loop_remove_timer(event_loop *ev, struct event_loop_callback_n
 }
 
 static void event_loop_remove_source(event_loop *ev, uint64_t source_id){
-    struct event_loop_callback_node *tpos;
-    struct hlist_node *pos, *tmp;
+    struct event_loop_callback_node *callback_node;
+    struct hlist_node *cur, *next;
     struct hlist_head *head = &(ev->callback_hash[EVENT_LOOP_CALLBACK_HASH(source_id)]);
-    hlist_for_each_entry_safe(tpos, pos, tmp, head, hlist_node){
-        if(tpos->source_id == source_id){
-            if(tpos->callback_type == EVENT_LOOP_CALLBACK_TYPE_TIMER){
-                event_loop_remove_timer(ev, tpos);
+    hlist_for_each_entry_safe(callback_node, cur, next, head, hlist_node){
+        if(callback_node->source_id == source_id){
+            if(callback_node->callback_type == EVENT_LOOP_CALLBACK_TYPE_TIMER){
+                event_loop_remove_timer(ev, callback_node);
+            } else if(callback_node->callback_type == EVENT_LOOP_CALLBACK_TYPE_SOON){
+                list_del(&(callback_node->list_node.call_soon_node));
             }
-	    hlist_del(pos);
-            free(tpos);
+	    hlist_del(cur);
+            free(callback_node);
 	    break;
 	}
     }
 }
 
 static uint64_t event_loop_call_soon(event_loop *ev, void(*callback)(struct event_loop *ev, uint64_t source_id, void *arg), void *arg){
-
+    struct event_loop_callback_node *callback_node = malloc(sizeof(struct event_loop_callback_node));
+    callback_node->source_id = ev->new_source_id(ev);
+    hlist_add_head(&(callback_node->hlist_node), &(ev->callback_hash[EVENT_LOOP_CALLBACK_HASH(callback_node->source_id)]));
+    callback_node->callback_type = EVENT_LOOP_CALLBACK_TYPE_SOON;
+    callback_node->callback = callback;
+    callback_node->arg = arg;
+    list_add_before(&(callback_node->list_node.call_soon_node), &(ev->call_soon_head));
+    return callback_node->source_id;
 }
 
 static void event_loop_poll(event_loop *ev){

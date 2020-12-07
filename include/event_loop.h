@@ -17,8 +17,7 @@ enum EVENT_LOOP_CALLBACK_TYPE {
     EVENT_LOOP_CALLBACK_TYPE_WRITER,
     EVENT_LOOP_CALLBACK_TYPE_SIGNAL,
     EVENT_LOOP_CALLBACK_TYPE_TIMER,
-    EVENT_LOOP_CALLBACK_TYPE_SOON,
-    EVENT_LOOP_CALLBACK_TYPE_CHILD
+    EVENT_LOOP_CALLBACK_TYPE_SOON
 };
 
 enum EVENT_LOOP_TIMER_TYPE {
@@ -61,9 +60,7 @@ struct event_loop_callback_node {
     struct hlist_node hlist_node;
     uint64_t source_id;
     union {
-	struct {
-           struct list_head node;
-	} call_soon_node;
+        struct list_head call_soon_node;
         struct {
            struct hlist_node node;
 	   int fd;
