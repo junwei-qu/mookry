@@ -201,5 +201,21 @@ static void event_loop_poll(event_loop *ev){
 }
 
 static uint64_t event_loop_add_signal(event_loop *ev, int signo, void(*callback)(struct event_loop *ev, uint64_t source_id, int signo, void *arg), void *arg){
-
+    struct event_loop_callback_node *cur, *next;
+    list_for_each_entry_safe(cur, next, &(ev->signal_head), list_node.signal_node.node) {
+        if(cur->list_node.signal_node.signo == signo){
+	    cur->callback = callback;
+	    cur->arg = arg;
+	    return cur->source_id;
+	}
+    }
+    cur = malloc(sizeof(struct event_loop_callback_node));
+    cur->source_id = ev->new_source_id(ev);
+    hlist_add_head(&(cur->hlist_node), &(ev->callback_hash[EVENT_LOOP_CALLBACK_HASH(cur->source_id)]));
+    cur->callback_type = EVENT_LOOP_CALLBACK_TYPE_SIGNAL;
+    cur->callback = callback;
+    cur->arg = arg;
+    cur->list_node.signal_node.signo = signo;
+    list_add_before(&(cur->list_node.signal_node.node), &(ev->signal_head));
+    return cur->source_id;
 }
