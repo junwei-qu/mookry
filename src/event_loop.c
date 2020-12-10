@@ -16,8 +16,7 @@ static void event_loop_destruct(event_loop *);
 static void event_loop_poll(event_loop *);
 static uint64_t event_loop_new_source_id(event_loop *);
 static future * event_loop_create_future(event_loop *);
-static uint64_t event_loop_add_reader(event_loop *, int, void(*)(struct event_loop *ev, uint64_t source_id, int fd, void *arg), void *);
-static uint64_t event_loop_add_writer(event_loop *, int, void(*)(struct event_loop *ev, uint64_t source_id, int fd, void *arg), void *);
+static uint64_t event_loop_add_fd(event_loop *, int, int, void(*)(struct event_loop *ev, uint64_t source_id, int fd, int event_type, void *arg), void *);
 static uint64_t event_loop_add_signal(event_loop *, int, void(*)(struct event_loop *ev, uint64_t source_id, int signo, void *arg), void *);
 static uint64_t event_loop_add_timer(event_loop *, struct timespec *, enum EVENT_LOOP_TIMER_TYPE, void(*)(struct event_loop *ev, uint64_t source_id, void *arg), void *);
 static uint64_t event_loop_call_soon(event_loop *, void(*)(struct event_loop *ev, uint64_t source_id, void *arg), void *);
@@ -47,8 +46,7 @@ event_loop *alloc_event_loop(){
     ev->poll = event_loop_poll;
     ev->new_source_id = event_loop_new_source_id;
     ev->create_future = event_loop_create_future;
-    ev->add_reader = event_loop_add_reader;
-    ev->add_writer = event_loop_add_writer;
+    ev->add_fd = event_loop_add_fd;
     ev->add_signal = event_loop_add_signal;
     ev->add_timer = event_loop_add_timer;
     ev->call_soon = event_loop_call_soon;
@@ -140,12 +138,25 @@ static uint64_t event_loop_add_timer(event_loop *ev, struct timespec *timespec, 
     return callback_node->source_id;
 }
 
-static uint64_t event_loop_add_reader(event_loop *ev, int fd, void(*callback)(struct event_loop *ev, uint64_t source_id, int fd, void *arg), void *arg){
+static uint64_t event_loop_add_fd(event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, uint64_t source_id, int fd, int event_type, void *arg), void *arg){
+    struct event_loop_callback_node *callback_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
+    hlist_for_each_entry_safe(callback_node, cur, next, head, list_node.fd_node.node){
+        if(callback_node->list_node.fd_node.fd == fd){
+	    event_type = event_type & (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
+	    int origin_event_type = callback_node->list_node.fd_node.event_type;
+	    if(!callback){
+                callback_node->list_node.fd_node.event_type &= ~event_type;
+	    } else {
+                callback_node->list_node.fd_node.event_type |= event_type;
+	    }
+	    if(origin_event_type != callback_node->list_node.fd_node.event_type){
 
-}
-
-static uint64_t event_loop_add_writer(event_loop *ev, int fd, void(*callback)(struct event_loop *ev, uint64_t source_id, int fd, void *arg), void *arg){
-
+	    }
+	    return callback_node->source_id;
+	}
+    }
 }
 
 static void event_loop_remove_timer(event_loop *ev, struct event_loop_callback_node *callback_node) {

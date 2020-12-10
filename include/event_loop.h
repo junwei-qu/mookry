@@ -10,11 +10,12 @@
 #define EVENT_LOOP_CALLBACK_HASH_SIZE 65536 
 #define EVENT_LOOP_CALLBACK_HASH(source_id) ((source_id) & (EVENT_LOOP_CALLBACK_HASH_SIZE - 1))
 #define EVENT_LOOP_FD_HASH_SIZE 8192 
-#define EVENT_LOOP_FD_HASH(source_id) ((source_id) & (EVENT_LOOP_FD_HASH_SIZE - 1))
+#define EVENT_LOOP_FD_HASH(fd) ((fd) & (EVENT_LOOP_FD_HASH_SIZE - 1))
+#define EVENT_LOOP_FD_READ 0x01
+#define EVENT_LOOP_FD_WRITE 0x02
 
 enum EVENT_LOOP_CALLBACK_TYPE {
-    EVENT_LOOP_CALLBACK_TYPE_READER,
-    EVENT_LOOP_CALLBACK_TYPE_WRITER,
+    EVENT_LOOP_CALLBACK_TYPE_FD,
     EVENT_LOOP_CALLBACK_TYPE_SIGNAL,
     EVENT_LOOP_CALLBACK_TYPE_TIMER,
     EVENT_LOOP_CALLBACK_TYPE_SOON
@@ -42,8 +43,7 @@ typedef struct event_loop {
     void (*poll)(struct event_loop *);
     uint64_t (*new_source_id)(struct event_loop *);
     struct future *(*create_future)(struct event_loop *);
-    uint64_t (*add_reader)(struct event_loop *, int, void(*)(struct event_loop *ev, uint64_t source_id, int fd, void *arg), void *);
-    uint64_t (*add_writer)(struct event_loop *, int, void(*)(struct event_loop *ev, uint64_t source_id, int fd, void *arg), void *);
+    uint64_t (*add_fd)(struct event_loop *, int, int, void(*)(struct event_loop *ev, uint64_t source_id, int fd, int event_type, void *arg), void *);
     uint64_t (*add_signal)(struct event_loop *, int, void(*)(struct event_loop *ev, uint64_t source_id, int signo, void *arg), void *);
     uint64_t (*add_timer)(struct event_loop *, struct timespec *timespec, enum EVENT_LOOP_TIMER_TYPE timer_type, void(*)(struct event_loop *ev, uint64_t source_id, void *arg), void *);
     uint64_t (*call_soon)(struct event_loop *, void(*)(struct event_loop *ev, uint64_t source_id, void *arg), void *);
@@ -63,8 +63,9 @@ struct event_loop_callback_node {
         struct list_head call_soon_node;
         struct {
            struct hlist_node node;
+	   int event_type;
 	   int fd;
-	} fd_hlist_node;
+	} fd_node;
 	struct {
            struct list_head node;
 	   int signo;
