@@ -167,6 +167,17 @@ static void event_loop_remove_timer(event_loop *ev, struct event_loop_callback_n
     }
 }
 
+static void event_loop_remove_signal(event_loop *ev, struct event_loop_callback_node *callback_node){
+    int signo = callback_node->list_node.signal_node.signo;
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigprocmask(SIG_SETMASK, NULL, &mask);
+    sigdelset(&mask, signo);
+    sigprocmask(SIG_SETMASK, &mask, NULL);
+    signalfd(ev->signalfd, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
+    list_del(&(callback_node->list_node.signal_node.node));
+}
+
 static void event_loop_remove_source(event_loop *ev, uint64_t source_id){
     struct event_loop_callback_node *callback_node;
     struct hlist_node *cur, *next;
@@ -177,6 +188,8 @@ static void event_loop_remove_source(event_loop *ev, uint64_t source_id){
                 event_loop_remove_timer(ev, callback_node);
             } else if(callback_node->callback_type == EVENT_LOOP_CALLBACK_TYPE_SOON){
                 list_del(&(callback_node->list_node.call_soon_node));
+            } else if(callback_node->callback_type == EVENT_LOOP_CALLBACK_TYPE_SIGNAL){
+                event_loop_remove_signal(ev, callback_node);
             }
 	    hlist_del(cur);
             free(callback_node);
@@ -209,6 +222,12 @@ static uint64_t event_loop_add_signal(event_loop *ev, int signo, void(*callback)
 	    return cur->source_id;
 	}
     }
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigprocmask(SIG_SETMASK, NULL, &mask);
+    sigaddset(&mask, signo);
+    sigprocmask(SIG_SETMASK, &mask, NULL);
+    signalfd(ev->signalfd, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
     cur = malloc(sizeof(struct event_loop_callback_node));
     cur->source_id = ev->new_source_id(ev);
     hlist_add_head(&(cur->hlist_node), &(ev->callback_hash[EVENT_LOOP_CALLBACK_HASH(cur->source_id)]));
