@@ -4,7 +4,6 @@
 #include <signal.h>
 #include <string.h>
 #include <time.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdint.h>
@@ -101,9 +100,7 @@ static void event_loop_destruct(struct event_loop *ev){
 }
 
 static uint64_t event_loop_new_source_id(event_loop *ev){
-    pthread_mutex_lock(&ev->mutex);
     (ev->source_id)++;
-    pthread_mutex_unlock(&ev->mutex);
     return ev->source_id;
 }
 

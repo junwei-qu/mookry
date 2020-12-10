@@ -1,5 +1,4 @@
 INCLUDE_PATH=-Iinclude
-LIBS=-lpthread
 CC=gcc
 FLAGS=-fPIC
 
