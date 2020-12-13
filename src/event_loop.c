@@ -139,24 +139,58 @@ static uint64_t event_loop_add_timer(event_loop *ev, struct timespec *timespec, 
 }
 
 static uint64_t event_loop_add_fd(event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, uint64_t source_id, int fd, int event_type, void *arg), void *arg){
+    struct epoll_event epoll_event;
     struct event_loop_callback_node *callback_node;
     struct hlist_node *cur, *next;
     struct hlist_head *head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
+    memset(&epoll_event, 0, sizeof(epoll_event));
+    event_type = event_type & (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
+    if(event_type & EVENT_LOOP_FD_READ && event_type & EVENT_LOOP_FD_WRITE){
+        epoll_event.events |= EPOLLIN | EPOLLOUT;
+    } else if(event_type & EVENT_LOOP_FD_READ){
+        epoll_event.events |= EPOLLIN;
+    } else if(event_type & EVENT_LOOP_FD_WRITE){
+        epoll_event.events |= EPOLLOUT;
+    }
+    epoll_event.events |= EPOLLRDHUP | EPOLLET;
     hlist_for_each_entry_safe(callback_node, cur, next, head, list_node.fd_node.node){
         if(callback_node->list_node.fd_node.fd == fd){
-	    event_type = event_type & (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
-	    int origin_event_type = callback_node->list_node.fd_node.event_type;
-	    if(!callback){
-                callback_node->list_node.fd_node.event_type &= ~event_type;
-	    } else {
-                callback_node->list_node.fd_node.event_type |= event_type;
-	    }
-	    if(origin_event_type != callback_node->list_node.fd_node.event_type){
-
+	    epoll_event.data.u64 = callback_node->source_id;
+	    callback_node->callback = callback;
+	    callback_node->arg = arg;
+	    if(event_type != callback_node->list_node.fd_node.event_type){
+                if(!callback_node->list_node.fd_node.event_type){
+		    epoll_ctl(ev->epollfd, fd, EPOLL_CTL_ADD, &epoll_event);
+		} else if(!event_type){
+		    epoll_ctl(ev->epollfd, fd, EPOLL_CTL_DEL, NULL);
+		} else {
+		    epoll_ctl(ev->epollfd, fd, EPOLL_CTL_MOD, &epoll_event);
+		}
+	        callback_node->list_node.fd_node.event_type = event_type;
 	    }
 	    return callback_node->source_id;
 	}
     }
+    callback_node = malloc(sizeof(struct event_loop_callback_node));
+    callback_node->source_id = ev->new_source_id(ev);
+    hlist_add_head(&(callback_node->hlist_node), &(ev->callback_hash[EVENT_LOOP_CALLBACK_HASH(callback_node->source_id)]));
+    callback_node->list_node.fd_node.fd = fd;
+    epoll_event.data.u64 = callback_node->source_id;
+    callback_node->callback = callback;
+    callback_node->arg = arg;
+    callback_node->list_node.fd_node.event_type = event_type;
+    if(event_type){
+        epoll_ctl(ev->epollfd, fd, EPOLL_CTL_ADD, &epoll_event);
+    }
+    hlist_add_head(&(callback_node->list_node.fd_node.node), head);
+    return callback_node->source_id;
+}
+
+static void event_loop_remove_fd(event_loop *ev, struct event_loop_callback_node *callback_node){
+    if(callback_node->list_node.fd_node.event_type){
+        epoll_ctl(ev->epollfd, callback_node->list_node.fd_node.fd, EPOLL_CTL_DEL, NULL);
+    }
+    hlist_del(&(callback_node->list_node.fd_node.node));
 }
 
 static void event_loop_remove_timer(event_loop *ev, struct event_loop_callback_node *callback_node) {
@@ -198,6 +232,8 @@ static void event_loop_remove_source(event_loop *ev, uint64_t source_id){
                 list_del(&(callback_node->list_node.call_soon_node));
             } else if(callback_node->callback_type == EVENT_LOOP_CALLBACK_TYPE_SIGNAL){
                 event_loop_remove_signal(ev, callback_node);
+            } else if(callback_node->callback_type == EVENT_LOOP_CALLBACK_TYPE_FD){
+                event_loop_remove_fd(ev, callback_node);
             }
 	    hlist_del(cur);
             free(callback_node);
