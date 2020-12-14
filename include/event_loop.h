@@ -40,6 +40,7 @@ struct event_loop_timer_node {
    struct hlist_node hlist_node;
    struct balance_binary_heap_value *heap_value;
    struct timespec timespec;
+   struct timespec timespec2;
    uint64_t timer_id;
    int (*callback)(struct event_loop *ev, uint64_t timer_id, void *arg);
    void *arg;
