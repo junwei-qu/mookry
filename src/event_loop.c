@@ -42,35 +42,46 @@ static void event_loop_timerfd_callback(struct event_loop *ev, int fd, int event
     uint64_t exp; 
     struct itimerspec itimerspec;
     struct event_loop_timer_node *timer_node, tmp_node;
-    if(event_type & EVENT_LOOP_FD_READ){
-        while(read(fd, &exp, sizeof(exp)) > 0){
-	}
-	timer_node = NULL;
-        clock_gettime(CLOCK_MONOTONIC, &(tmp_node.timespec));
-	while((timer_node = ev->timer_heap->peek_value(ev->timer_heap)) && (event_loop_timer_node_cmp(timer_node, &tmp_node) >= 0)){
-            if(timer_node->callback(ev, timer_node->timer_id, timer_node->arg)){
-	        do{
-                    timer_node->timespec.tv_sec += timer_node->timespec2.tv_sec;
-                    timer_node->timespec.tv_nsec += timer_node->timespec2.tv_nsec;
-                    while(timer_node->timespec.tv_nsec >= 1000000000){
-                        timer_node->timespec.tv_sec += 1;
-             	        timer_node->timespec.tv_nsec -= 1000000000;
-                    }
-		}while(event_loop_timer_node_cmp(timer_node, &tmp_node) >= 0);
-                ev->timer_heap->heapify(ev->timer_heap, timer_node->heap_value);
-	    } else {
-                ev->timer_heap->delete_value(ev->timer_heap, timer_node->heap_value);
-                hlist_del(&(timer_node->hlist_node));
-		free(timer_node);
+    while(read(fd, &exp, sizeof(exp)) > 0){
+    }
+    timer_node = NULL;
+    clock_gettime(CLOCK_MONOTONIC, &(tmp_node.timespec));
+    while((timer_node = ev->timer_heap->peek_value(ev->timer_heap)) && (event_loop_timer_node_cmp(timer_node, &tmp_node) >= 0)){
+        if(timer_node->callback(ev, timer_node->timer_id, timer_node->arg)){
+            do{
+                timer_node->timespec.tv_sec += timer_node->timespec2.tv_sec;
+                timer_node->timespec.tv_nsec += timer_node->timespec2.tv_nsec;
+                while(timer_node->timespec.tv_nsec >= 1000000000){
+                    timer_node->timespec.tv_sec += 1;
+         	    timer_node->timespec.tv_nsec -= 1000000000;
+                }
+       	    }while(event_loop_timer_node_cmp(timer_node, &tmp_node) >= 0);
+            ev->timer_heap->heapify(ev->timer_heap, timer_node->heap_value);
+        } else {
+            ev->timer_heap->delete_value(ev->timer_heap, timer_node->heap_value);
+            hlist_del(&(timer_node->hlist_node));
+    	    free(timer_node);
+        }
+    }
+    memset(&itimerspec, 0, sizeof(struct itimerspec));
+    if(timer_node){
+        memcpy(&(itimerspec.it_value), &(timer_node->timespec), sizeof(struct timespec));
+        timerfd_settime(ev->timerfd, TFD_TIMER_ABSTIME, &itimerspec, NULL);
+    } else {
+        timerfd_settime(ev->timerfd, TFD_TIMER_ABSTIME, &itimerspec, NULL);
+    }
+}
+
+static void event_loop_signalfd_callback(struct event_loop *ev, int fd, int event_type, void *arg){
+    struct signalfd_siginfo fdsi;
+    struct event_loop_signal_node *cur, *next;
+    while(read(fd, &fdsi, sizeof(struct signalfd_siginfo)) > 0){
+        list_for_each_entry_safe(cur, next, &(ev->signal_head), list_node) {
+            if(cur->signo == fdsi.ssi_signo){
+	        cur->callback(ev, cur->signo, arg);
+                break;
 	    }
-	}
-        memset(&itimerspec, 0, sizeof(struct itimerspec));
-	if(timer_node){
-            memcpy(&(itimerspec.it_value), &(timer_node->timespec), sizeof(struct timespec));
-            timerfd_settime(ev->timerfd, TFD_TIMER_ABSTIME, &itimerspec, NULL);
-	} else {
-            timerfd_settime(ev->timerfd, TFD_TIMER_ABSTIME, &itimerspec, NULL);
-	}
+        }
     }
 }
 
@@ -97,7 +108,7 @@ static void event_loop_init(struct event_loop *ev){
     sigset_t mask;
     sigemptyset(&mask);
     ev->signalfd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
-    //ev->add_fd(ev, ev->signalfd);
+    ev->add_fd(ev, ev->signalfd, EVENT_LOOP_FD_READ, event_loop_signalfd_callback, NULL);
     ev->timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK|TFD_CLOEXEC);
     ev->add_fd(ev, ev->timerfd, EVENT_LOOP_FD_READ, event_loop_timerfd_callback, NULL);
     ev->timer_heap = alloc_heap(event_loop_timer_node_cmp);
@@ -308,12 +319,6 @@ static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct eve
     defer_node->arg = arg;
     list_add_before(&(defer_node->list_node), &(ev->defer_head));
     return 0;
-}
-
-static void event_loop_signalfd_callback(struct event_loop *ev, int fd, int event_type, void *arg){
-    if(event_type & EVENT_LOOP_FD_READ){
-
-    }
 }
 
 static void event_loop_poll(struct event_loop *ev){
