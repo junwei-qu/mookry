@@ -13,7 +13,7 @@
 
 static void event_loop_init(struct event_loop *ev);
 static void event_loop_destruct(struct event_loop *ev);
-static void event_loop_poll(struct event_loop *ev);
+static int event_loop_poll(struct event_loop *ev, int timeout);
 static int event_loop_add_fd(struct event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
 static void event_loop_remove_fd(struct event_loop *ev, int fd);
 static int event_loop_add_signal(struct event_loop *ev, int signo, void(*callback)(struct event_loop *ev, int signo, void *arg), void *arg);
@@ -175,6 +175,7 @@ static int event_loop_add_fd(struct event_loop *ev, int fd, int event_type, void
         epoll_event.events |= EPOLLOUT;
     }
     epoll_event.events |= EPOLLRDHUP | EPOLLET;
+    epoll_event.data.fd = fd;
     hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
         if(fd_node->fd == fd){
 	    fd_node->callback = callback;
@@ -321,7 +322,22 @@ static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct eve
     return 0;
 }
 
-static void event_loop_poll(struct event_loop *ev){
-
+static int event_loop_poll(struct event_loop *ev, int timeout){
+    int nfds, n, fd, events, event_type;
+    event_type = 0;
+    nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout);
+    if(nfds > 0){
+        for(n = 0; n < nfds; n++){
+            fd = ev->events[n].data.fd;
+	    events = ev->events[n].events;
+	    if(events & EPOLLIN){
+                event_type |= EVENT_LOOP_FD_READ;
+	    }
+	    if(events & EPOLLOUT){
+                event_type |= EVENT_LOOP_FD_WRITE;
+	    }
+	}
+    }
+    return nfds;
 }
 

@@ -1,4 +1,4 @@
-#ifndef   _FUTURE_H
+#ifndef  _FUTURE_H
 #define  _FUTURE_H
 #include "event_loop.h"
 #include "list.h"
