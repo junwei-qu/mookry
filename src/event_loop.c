@@ -105,13 +105,6 @@ struct event_loop *alloc_event_loop(){
 static void event_loop_init(struct event_loop *ev){
     ev->epollfd = epoll_create(1);
     ev->source_id = 1;
-    sigset_t mask;
-    sigemptyset(&mask);
-    ev->signalfd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
-    ev->add_fd(ev, ev->signalfd, EVENT_LOOP_FD_READ, event_loop_signalfd_callback, NULL);
-    ev->timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK|TFD_CLOEXEC);
-    ev->add_fd(ev, ev->timerfd, EVENT_LOOP_FD_READ, event_loop_timerfd_callback, NULL);
-    ev->timer_heap = alloc_heap(event_loop_timer_node_cmp);
     int i;
     for(i = 0; i < EVENT_LOOP_FD_HASH_SIZE; i++){
         INIT_HLIST_HEAD(&ev->fd_hash[i]);
@@ -121,6 +114,13 @@ static void event_loop_init(struct event_loop *ev){
     }
     INIT_LIST_HEAD(&ev->defer_head); 
     INIT_LIST_HEAD(&ev->signal_head); 
+    sigset_t mask;
+    sigemptyset(&mask);
+    ev->signalfd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
+    ev->add_fd(ev, ev->signalfd, EVENT_LOOP_FD_READ, event_loop_signalfd_callback, NULL);
+    ev->timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK|TFD_CLOEXEC);
+    ev->add_fd(ev, ev->timerfd, EVENT_LOOP_FD_READ, event_loop_timerfd_callback, NULL);
+    ev->timer_heap = alloc_heap(event_loop_timer_node_cmp);
 }
 
 void free_event_loop(struct event_loop *ev){
@@ -182,11 +182,11 @@ static int event_loop_add_fd(struct event_loop *ev, int fd, int event_type, void
 	    fd_node->arg = arg;
 	    if(event_type != fd_node->event_type){
                 if(!fd_node->event_type){
-		    epoll_ctl(ev->epollfd, fd, EPOLL_CTL_ADD, &epoll_event);
+		    epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
 		} else if(!event_type){
-		    epoll_ctl(ev->epollfd, fd, EPOLL_CTL_DEL, NULL);
+		    epoll_ctl(ev->epollfd, EPOLL_CTL_DEL, fd, NULL);
 		} else {
-		    epoll_ctl(ev->epollfd, fd, EPOLL_CTL_MOD, &epoll_event);
+		    epoll_ctl(ev->epollfd, EPOLL_CTL_MOD, fd, &epoll_event);
 		}
 	        fd_node->event_type = event_type;
 	    }
@@ -200,7 +200,7 @@ static int event_loop_add_fd(struct event_loop *ev, int fd, int event_type, void
     fd_node->arg = arg;
     fd_node->event_type = event_type;
     if(event_type){
-        epoll_ctl(ev->epollfd, fd, EPOLL_CTL_ADD, &epoll_event);
+        epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
     }
     return 0;
 }
@@ -212,7 +212,7 @@ static void event_loop_remove_fd(struct event_loop *ev, int fd){
     hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
         if(fd_node->fd == fd){
 	    if(fd_node->event_type){
-                epoll_ctl(ev->epollfd, fd_node->fd, EPOLL_CTL_DEL, NULL);
+                epoll_ctl(ev->epollfd, EPOLL_CTL_DEL, fd, NULL);
 	    }
             hlist_del(&(fd_node->hlist_node));
 	    free(fd_node);
