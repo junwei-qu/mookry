@@ -309,6 +309,7 @@ static void event_loop_remove_signal(struct event_loop *ev, int signo){
             sigprocmask(SIG_SETMASK, &mask, NULL);
             signalfd(ev->signalfd, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
 	    list_del(&cur->list_node);
+	    free(cur);
             return;
 	}
     }
@@ -324,6 +325,10 @@ static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct eve
 
 static int event_loop_poll(struct event_loop *ev, int timeout){
     int nfds, n, fd, events, event_type;
+    struct event_loop_fd_node *fd_node;
+    struct event_loop_defer_node *cur_defer, *next_defer;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
     event_type = 0;
     nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout);
     if(nfds > 0){
@@ -336,6 +341,28 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
 	    if(events & EPOLLOUT){
                 event_type |= EVENT_LOOP_FD_WRITE;
 	    }
+	    if(events & EPOLLRDHUP){
+                event_type |= EVENT_LOOP_FD_READ;
+	    }
+	    if(events & EPOLLERR){
+                event_type |= EVENT_LOOP_FD_READ;
+	    }
+	    if(events & EPOLLHUP){
+                event_type |= EVENT_LOOP_FD_READ;
+	    }
+            head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
+            hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
+                if(fd_node->fd == fd){
+		    fd_node->callback(ev, fd, event_type, fd_node->arg);
+		    break;
+	        }
+            }
+	}
+    }
+    list_for_each_entry_safe(cur_defer, next_defer, &(ev->defer_head), list_node) {
+        if(!cur_defer->callback(ev, cur_defer->arg)){
+	    list_del(&cur_defer->list_node);
+	    free(cur_defer);
 	}
     }
     return nfds;
