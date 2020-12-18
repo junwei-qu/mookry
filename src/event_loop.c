@@ -39,15 +39,31 @@ static int event_loop_timer_node_cmp(const void *arg1, const void *arg2) {
 }
 
 static void event_loop_timerfd_callback(struct event_loop *ev, int fd, int event_type, void *arg){
-    uint64_t exp; 
+    uint64_t exp, timer_id; 
     struct itimerspec itimerspec;
     struct event_loop_timer_node *timer_node, tmp_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int callback_ret;
+    int deleted;
     while(read(fd, &exp, sizeof(exp)) > 0){
     }
-    timer_node = NULL;
     clock_gettime(CLOCK_MONOTONIC, &(tmp_node.timespec));
     while((timer_node = ev->timer_heap->peek_value(ev->timer_heap)) && (event_loop_timer_node_cmp(timer_node, &tmp_node) >= 0)){
-        if(timer_node->callback(ev, timer_node->timer_id, timer_node->arg)){
+        timer_id = timer_node->timer_id;
+        deleted = 1;
+        callback_ret = timer_node->callback(ev, timer_id, timer_node->arg);
+        head = &(ev->timer_hash[EVENT_LOOP_TIMER_HASH(timer_id)]);
+        hlist_for_each_entry_safe(timer_node, cur, next, head, hlist_node){
+            if(timer_node->timer_id == timer_id){
+                deleted = 0;
+                break;
+            }
+        }
+        if(deleted){
+            continue;
+        }
+        if(callback_ret){
             do{
                 timer_node->timespec.tv_sec += timer_node->timespec2.tv_sec;
                 timer_node->timespec.tv_nsec += timer_node->timespec2.tv_nsec;
