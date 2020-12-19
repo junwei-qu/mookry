@@ -46,8 +46,7 @@ static void event_loop_timerfd_callback(struct event_loop *ev, int fd, int event
     struct hlist_head *head; 
     int callback_ret;
     int deleted;
-    while(read(fd, &exp, sizeof(exp)) > 0){
-    }
+    while(read(fd, &exp, sizeof(exp)) > 0){}
     clock_gettime(CLOCK_MONOTONIC, &(tmp_node.timespec));
     while((timer_node = ev->timer_heap->peek_value(ev->timer_heap)) && (event_loop_timer_node_cmp(timer_node, &tmp_node) >= 0)){
         timer_id = timer_node->timer_id;
@@ -123,6 +122,8 @@ static void event_loop_init(struct event_loop *ev){
     sigset_t mask;
     ev->epollfd = epoll_create(4096);
     ev->source_id = 1;
+    ev->recursive_depth = 0;
+    ev->defer_free = 0;
     for(i = 0; i < EVENT_LOOP_FD_HASH_SIZE; i++){
         INIT_HLIST_HEAD(&ev->fd_hash[i]);
     }
@@ -130,6 +131,7 @@ static void event_loop_init(struct event_loop *ev){
         INIT_HLIST_HEAD(&ev->timer_hash[i]);
     }
     INIT_LIST_HEAD(&ev->defer_head); 
+    INIT_LIST_HEAD(&ev->tmp_defer_head); 
     INIT_LIST_HEAD(&ev->signal_head); 
     sigemptyset(&mask);
     ev->signalfd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
@@ -140,16 +142,20 @@ static void event_loop_init(struct event_loop *ev){
 }
 
 void free_event_loop(struct event_loop *ev){
-    ev->destruct(ev);
-    free(ev);
+    if(ev->recursive_depth){
+        ev->defer_free = 1;
+    } else  {
+        ev->destruct(ev);
+        free(ev);
+    }
 }
 
 static void event_loop_destruct(struct event_loop *ev){
     int i;
+    struct hlist_head *head;
+    struct hlist_node *cur, *next;
     struct event_loop_fd_node *fd_node;
     struct event_loop_timer_node *timer_node;
-    struct hlist_node *cur, *next;
-    struct hlist_head *head;
     struct event_loop_signal_node *cur_signal_node, *next_signal_node;
     struct event_loop_defer_node *cur_defer_node, *next_defer_node;
     close(ev->epollfd);
@@ -345,6 +351,7 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
     struct event_loop_defer_node *cur_defer, *next_defer;
     struct hlist_node *cur, *next;
     struct hlist_head *head; 
+    ev->recursive_depth += 1;
     event_type = 0;
     nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout);
     if(nfds > 0){
@@ -375,11 +382,18 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
             }
 	}
     }
-    list_for_each_entry_safe(cur_defer, next_defer, &(ev->defer_head), list_node) {
+    list_join(&(ev->defer_head), &(ev->tmp_defer_head));
+    list_for_each_entry_safe(cur_defer, next_defer, &(ev->tmp_defer_head), list_node) {
+	list_del(&cur_defer->list_node);
         if(!cur_defer->callback(ev, cur_defer->arg)){
-	    list_del(&cur_defer->list_node);
-	    free(cur_defer);
+            free(cur_defer);
+	} else {
+            list_add_before(&(cur_defer->list_node), &(ev->defer_head));
 	}
+    }
+    ev->recursive_depth -= 1;
+    if(!ev->recursive_depth && ev->defer_free){
+        free_event_loop(ev); 
     }
     return nfds;
 }

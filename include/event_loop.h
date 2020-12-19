@@ -19,10 +19,13 @@ struct event_loop {
     int epollfd;
     int signalfd;
     int timerfd;
+    uint64_t recursive_depth;
+    int defer_free;
     uint64_t source_id;
     struct epoll_event events[EVENT_LOOP_MAX_EVENTS];
     struct hlist_head fd_hash[EVENT_LOOP_FD_HASH_SIZE];
     struct list_head defer_head;
+    struct list_head tmp_defer_head;
     struct list_head signal_head;
     struct hlist_head timer_hash[EVENT_LOOP_TIMER_HASH_SIZE];
     struct balance_binary_heap *timer_heap;
