@@ -1,4 +1,6 @@
+#define _GNU_SOURCE
 #include <sys/epoll.h>
+#include <errno.h>
 #include <sys/timerfd.h>
 #include <sys/signalfd.h>
 #include <signal.h>
@@ -13,14 +15,24 @@
 
 static void event_loop_init(struct event_loop *ev);
 static void event_loop_destruct(struct event_loop *ev);
+static int event_loop_accept(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+static int event_loop_accept4(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
+static ssize_t event_loop_read(struct event_loop *ev, int fd, void *buf, size_t count);
+static ssize_t event_loop_write(struct event_loop *ev, int fd, const void *buf, size_t count);
 static int event_loop_poll(struct event_loop *ev, int timeout);
-static int event_loop_add_fd(struct event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
-static void event_loop_remove_fd(struct event_loop *ev, int fd);
+static int event_loop_add_reader(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
+static void event_loop_remove_reader(struct event_loop *ev, int fd);
+static int event_loop_add_writer(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
+static void event_loop_remove_writer(struct event_loop *ev, int fd);
+static int event_loop_add_reader_writer(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
+static void event_loop_remove_reader_writer(struct event_loop *ev, int fd);
 static int event_loop_add_signal(struct event_loop *ev, int signo, void(*callback)(struct event_loop *ev, int signo, void *arg), void *arg);
 static void event_loop_remove_signal(struct event_loop *ev, int signo);
 static uint64_t event_loop_add_timer(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, uint64_t timer_id, void *arg), void *arg);
 static void event_loop_remove_timer(struct event_loop *ev, uint64_t timer_id);
 static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct event_loop *ev, void *arg), void *arg);
+static int event_loop_add_event(struct event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
+static void event_loop_remove_event(struct event_loop *ev, int fd, int event_type);
 
 static int event_loop_timer_node_cmp(const void *arg1, const void *arg2) {
     const struct event_loop_timer_node *timer_node1 = arg1;
@@ -46,7 +58,7 @@ static void event_loop_timerfd_callback(struct event_loop *ev, int fd, int event
     struct hlist_head *head; 
     int callback_ret;
     int deleted;
-    while(read(fd, &exp, sizeof(exp)) > 0){}
+    while(ev->read(ev, fd, &exp, sizeof(exp)) > 0){}
     clock_gettime(CLOCK_MONOTONIC, &(tmp_node.timespec));
     while((timer_node = ev->timer_heap->peek_value(ev->timer_heap)) && (event_loop_timer_node_cmp(timer_node, &tmp_node) >= 0)){
         timer_id = timer_node->timer_id;
@@ -90,7 +102,7 @@ static void event_loop_timerfd_callback(struct event_loop *ev, int fd, int event
 static void event_loop_signalfd_callback(struct event_loop *ev, int fd, int event_type, void *arg){
     struct signalfd_siginfo fdsi;
     struct event_loop_signal_node *cur, *next;
-    while(read(fd, &fdsi, sizeof(struct signalfd_siginfo)) > 0){
+    while(ev->read(ev, fd, &fdsi, sizeof(struct signalfd_siginfo)) > 0){
         list_for_each_entry_safe(cur, next, &(ev->signal_head), list_node) {
             if(cur->signo == fdsi.ssi_signo){
 	        cur->callback(ev, cur->signo, arg);
@@ -105,9 +117,17 @@ struct event_loop *alloc_event_loop(){
     ev = calloc(1, sizeof(struct event_loop));
     ev->init = event_loop_init;
     ev->destruct = event_loop_destruct;
+    ev->accept = event_loop_accept;
+    ev->accept4 = event_loop_accept4;
+    ev->read = event_loop_read;
+    ev->write = event_loop_write;
     ev->poll = event_loop_poll;
-    ev->add_fd = event_loop_add_fd;
-    ev->remove_fd = event_loop_remove_fd;
+    ev->add_reader = event_loop_add_reader;
+    ev->remove_reader = event_loop_remove_reader;
+    ev->add_writer = event_loop_add_writer;
+    ev->remove_writer = event_loop_remove_writer;
+    ev->add_reader_writer = event_loop_add_reader_writer;
+    ev->remove_reader_writer = event_loop_remove_reader_writer;
     ev->add_signal = event_loop_add_signal;
     ev->remove_signal = event_loop_remove_signal;
     ev->add_timer = event_loop_add_timer;
@@ -127,6 +147,9 @@ static void event_loop_init(struct event_loop *ev){
     for(i = 0; i < EVENT_LOOP_FD_HASH_SIZE; i++){
         INIT_HLIST_HEAD(&ev->fd_hash[i]);
     }
+    for(i = 0; i < EVENT_LOOP_READY_FD_HASH_SIZE; i++){
+        INIT_HLIST_HEAD(&ev->ready_fd_hash[i]);
+    }
     for(i = 0; i < EVENT_LOOP_TIMER_HASH_SIZE; i++){
         INIT_HLIST_HEAD(&ev->timer_hash[i]);
     }
@@ -135,9 +158,9 @@ static void event_loop_init(struct event_loop *ev){
     INIT_LIST_HEAD(&ev->signal_head); 
     sigemptyset(&mask);
     ev->signalfd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
-    ev->add_fd(ev, ev->signalfd, EVENT_LOOP_FD_READ, event_loop_signalfd_callback, NULL);
+    ev->add_reader(ev, ev->signalfd, event_loop_signalfd_callback, NULL);
     ev->timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK|TFD_CLOEXEC);
-    ev->add_fd(ev, ev->timerfd, EVENT_LOOP_FD_READ, event_loop_timerfd_callback, NULL);
+    ev->add_reader(ev, ev->timerfd, event_loop_timerfd_callback, NULL);
     ev->timer_heap = alloc_heap(event_loop_timer_node_cmp);
 }
 
@@ -182,35 +205,38 @@ static void event_loop_destruct(struct event_loop *ev){
     }
 }
 
-static int event_loop_add_fd(struct event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg){
+static int event_loop_add_event(struct event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg){
     struct epoll_event epoll_event;
     struct event_loop_fd_node *fd_node;
     struct hlist_node *cur, *next;
     struct hlist_head *head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
     memset(&epoll_event, 0, sizeof(epoll_event));
     event_type = event_type & (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
-    if(event_type & EVENT_LOOP_FD_READ && event_type & EVENT_LOOP_FD_WRITE){
-        epoll_event.events |= EPOLLIN | EPOLLOUT;
-    } else if(event_type & EVENT_LOOP_FD_READ){
-        epoll_event.events |= EPOLLIN;
-    } else if(event_type & EVENT_LOOP_FD_WRITE){
-        epoll_event.events |= EPOLLOUT;
-    }
-    epoll_event.events |= EPOLLRDHUP | EPOLLET;
-    epoll_event.data.fd = fd;
     hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
         if(fd_node->fd == fd){
-	    fd_node->callback = callback;
-	    fd_node->arg = arg;
-	    if(event_type != fd_node->event_type){
-                if(!fd_node->event_type){
-		    epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
-		} else if(!event_type){
-		    epoll_ctl(ev->epollfd, EPOLL_CTL_DEL, fd, NULL);
-		} else {
-		    epoll_ctl(ev->epollfd, EPOLL_CTL_MOD, fd, &epoll_event);
-		}
-	        fd_node->event_type = event_type;
+            if(event_type & EVENT_LOOP_FD_READ){
+	        fd_node->reader_callback = callback;
+	        fd_node->reader_arg = arg;
+            } 
+	    if(event_type & EVENT_LOOP_FD_WRITE){
+	        fd_node->writer_callback = callback;
+	        fd_node->writer_arg = arg;
+            }
+	    if(fd_node->event_type != (fd_node->event_type | event_type)){
+	        fd_node->event_type |= event_type;
+                if(fd_node->event_type & EVENT_LOOP_FD_READ){
+                    epoll_event.events |= EPOLLIN;
+                } 
+		if(fd_node->event_type & EVENT_LOOP_FD_WRITE){
+                    epoll_event.events |= EPOLLOUT;
+                }
+                epoll_event.events |= EPOLLRDHUP | EPOLLET;
+                epoll_event.data.fd = fd;
+		epoll_ctl(ev->epollfd, EPOLL_CTL_MOD, fd, &epoll_event);
+	        if(!hlist_unhashed(&(fd_node->hlist_ready_node))){
+		    fd_node->ready_event_type = 0;
+                    hlist_del(&(fd_node->hlist_ready_node));
+	        }
 	    }
 	    return 0;
 	}
@@ -218,29 +244,90 @@ static int event_loop_add_fd(struct event_loop *ev, int fd, int event_type, void
     fd_node = calloc(1, sizeof(struct event_loop_fd_node));
     hlist_add_head(&(fd_node->hlist_node), head);
     fd_node->fd = fd;
-    fd_node->callback = callback;
-    fd_node->arg = arg;
-    fd_node->event_type = event_type;
-    if(event_type){
-        epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
+    if(event_type & EVENT_LOOP_FD_READ){
+        epoll_event.events |= EPOLLIN;
+        fd_node->reader_callback = callback;
+        fd_node->reader_arg = arg;
     }
+    if(event_type & EVENT_LOOP_FD_WRITE){
+        epoll_event.events |= EPOLLOUT;
+        fd_node->writer_callback = callback;
+        fd_node->writer_arg = arg;
+    }
+    epoll_event.events |= EPOLLRDHUP | EPOLLET;
+    epoll_event.data.fd = fd;
+    fd_node->event_type = event_type;
+    epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
     return 0;
 }
 
-static void event_loop_remove_fd(struct event_loop *ev, int fd){
+static int event_loop_add_reader(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg){
+    return event_loop_add_event(ev, fd, EVENT_LOOP_FD_READ, callback, arg);
+}
+
+static int event_loop_add_writer(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg){
+    return event_loop_add_event(ev, fd, EVENT_LOOP_FD_WRITE, callback, arg);
+}
+
+static int event_loop_add_reader_writer(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg){
+    return event_loop_add_event(ev, fd, EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE, callback, arg);
+}
+
+static void event_loop_remove_event(struct event_loop *ev, int fd, int event_type){
+    struct epoll_event epoll_event;
     struct event_loop_fd_node *fd_node;
     struct hlist_node *cur, *next;
     struct hlist_head *head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
+    event_type = event_type & (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
     hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
         if(fd_node->fd == fd){
-	    if(fd_node->event_type){
-                epoll_ctl(ev->epollfd, EPOLL_CTL_DEL, fd, NULL);
+	    if(fd_node->event_type != fd_node->event_type & (~event_type)){
+	        fd_node->event_type &= ~event_type;
+	        if(event_type & EVENT_LOOP_FD_READ){
+	            fd_node->reader_callback = fd_node->reader_arg = NULL;
+		}
+	        if(event_type & EVENT_LOOP_FD_WRITE){
+	            fd_node->writer_callback = fd_node->writer_arg = NULL;
+		}
+		if(!fd_node->event_type){
+                    epoll_ctl(ev->epollfd, EPOLL_CTL_DEL, fd, NULL);
+                    hlist_del(&(fd_node->hlist_node));
+                    if(!hlist_unhashed(&(fd_node->hlist_ready_node))){
+                        hlist_del(&(fd_node->hlist_ready_node));
+                    }
+	            free(fd_node);
+		} else {
+                    memset(&epoll_event, 0, sizeof(epoll_event));
+                    if(fd_node->event_type & EVENT_LOOP_FD_READ){
+                        epoll_event.events |= EPOLLIN;
+                    } 
+	            if(fd_node->event_type & EVENT_LOOP_FD_WRITE){
+                        epoll_event.events |= EPOLLOUT;
+                    }
+                    epoll_event.events |= EPOLLRDHUP | EPOLLET;
+                    epoll_event.data.fd = fd;
+	            epoll_ctl(ev->epollfd, EPOLL_CTL_MOD, fd, &epoll_event);
+	            if(!hlist_unhashed(&(fd_node->hlist_ready_node))){
+	                fd_node->ready_event_type = 0;
+                        hlist_del(&(fd_node->hlist_ready_node));
+	            }
+	        }
 	    }
-            hlist_del(&(fd_node->hlist_node));
-	    free(fd_node);
 	    return;
 	}
     }
+}
+
+static void event_loop_remove_reader(struct event_loop *ev, int fd){
+    event_loop_remove_event(ev, fd, EVENT_LOOP_FD_READ);
+}
+
+static void event_loop_remove_writer(struct event_loop *ev, int fd){
+    event_loop_remove_event(ev, fd, EVENT_LOOP_FD_WRITE);
+}
+
+static void event_loop_remove_reader_writer(struct event_loop *ev, int fd){
+    event_loop_remove_event(ev, fd, EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
 }
 
 static uint64_t event_loop_add_timer(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, uint64_t timer_id, void *arg), void *arg){
@@ -346,16 +433,30 @@ static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct eve
 }
 
 static int event_loop_poll(struct event_loop *ev, int timeout){
-    int nfds, n, fd, events, event_type;
+    int nfds, n, fd, events, event_type, origin_event_type;
     struct event_loop_fd_node *fd_node;
     struct event_loop_defer_node *cur_defer, *next_defer;
     struct hlist_node *cur, *next;
     struct hlist_head *head; 
     ev->recursive_depth += 1;
-    event_type = 0;
+loop_ready:
+    for(n = 0; n < EVENT_LOOP_READY_FD_HASH_SIZE; n++){
+        head = &ev->ready_fd_hash[n];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->ready_event_type & EVENT_LOOP_FD_READ && fd_node->reader_callback){
+                fd_node->reader_callback(ev, fd_node->fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
+	        goto loop_ready;
+	    }
+	    if(fd_node->ready_event_type & EVENT_LOOP_FD_WRITE && fd_node->writer_callback){
+                fd_node->writer_callback(ev, fd_node->fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
+	        goto loop_ready;
+	    }
+	}
+    }
     nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout);
     if(nfds > 0){
         for(n = 0; n < nfds; n++){
+            event_type = 0;
             fd = ev->events[n].data.fd;
 	    events = ev->events[n].events;
 	    if(events & EPOLLIN){
@@ -374,9 +475,28 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
                 event_type |= EVENT_LOOP_FD_READ;
 	    }
             head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
+      loop_fd:
+            origin_event_type = event_type;
             hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
                 if(fd_node->fd == fd){
-		    fd_node->callback(ev, fd, event_type, fd_node->arg);
+		    event_type &= ~EVENT_LOOP_FD_READ;
+	            if(origin_event_type & EVENT_LOOP_FD_READ && fd_node->reader_callback){
+		        fd_node->ready_event_type |= EVENT_LOOP_FD_READ;
+		        if(hlist_unhashed(&(fd_node->hlist_ready_node))){
+                            hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
+		        }
+                        fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
+			goto loop_fd;
+	            }
+		    event_type &= ~EVENT_LOOP_FD_WRITE;
+	            if(origin_event_type & EVENT_LOOP_FD_WRITE && fd_node->writer_callback){
+		        fd_node->ready_event_type |= EVENT_LOOP_FD_WRITE;
+		        if(hlist_unhashed(&(fd_node->hlist_ready_node))){
+                            hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
+		        }
+                        fd_node->writer_callback(ev, fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
+			goto loop_fd;
+	            }
 		    break;
 	        }
             }
@@ -398,3 +518,82 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
     return nfds;
 }
 
+static int event_loop_accept(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = accept(sockfd, addr, addrlen);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
+                fd_node->ready_event_type &= ~EVENT_LOOP_FD_READ;
+		if(!fd_node->ready_event_type){
+                    hlist_del(&(fd_node->hlist_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static int event_loop_accept4(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = accept4(sockfd, addr, addrlen, flags);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
+                fd_node->ready_event_type &= ~EVENT_LOOP_FD_READ;
+		if(!fd_node->ready_event_type){
+                    hlist_del(&(fd_node->hlist_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static ssize_t event_loop_read(struct event_loop *ev, int fd, void *buf, size_t count){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = read(fd, buf, count);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == fd){
+                fd_node->ready_event_type &= ~EVENT_LOOP_FD_READ;
+		if(!fd_node->ready_event_type){
+                    hlist_del(&(fd_node->hlist_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static ssize_t event_loop_write(struct event_loop *ev, int fd, const void *buf, size_t count){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = write(fd, buf, count);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == fd){
+                fd_node->ready_event_type &= ~EVENT_LOOP_FD_WRITE;
+		if(!fd_node->ready_event_type){
+                    hlist_del(&(fd_node->hlist_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
