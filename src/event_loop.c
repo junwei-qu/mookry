@@ -230,7 +230,7 @@ static int event_loop_add_event(struct event_loop *ev, int fd, int event_type, v
 		if(fd_node->event_type & EVENT_LOOP_FD_WRITE){
                     epoll_event.events |= EPOLLOUT;
                 }
-                epoll_event.events |= EPOLLRDHUP | EPOLLET;
+                epoll_event.events |= (EPOLLRDHUP | EPOLLET);
                 epoll_event.data.fd = fd;
 		epoll_ctl(ev->epollfd, EPOLL_CTL_MOD, fd, &epoll_event);
 	        if(!hlist_unhashed(&(fd_node->hlist_ready_node))){
@@ -254,7 +254,7 @@ static int event_loop_add_event(struct event_loop *ev, int fd, int event_type, v
         fd_node->writer_callback = callback;
         fd_node->writer_arg = arg;
     }
-    epoll_event.events |= EPOLLRDHUP | EPOLLET;
+    epoll_event.events |= (EPOLLRDHUP | EPOLLET);
     epoll_event.data.fd = fd;
     fd_node->event_type = event_type;
     epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
@@ -281,8 +281,8 @@ static void event_loop_remove_event(struct event_loop *ev, int fd, int event_typ
     event_type = event_type & (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
     hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
         if(fd_node->fd == fd){
-	    if(fd_node->event_type != fd_node->event_type & (~event_type)){
-	        fd_node->event_type &= ~event_type;
+	    if(fd_node->event_type != (fd_node->event_type & (~event_type))){
+	        fd_node->event_type &= (~event_type);
 	        if(event_type & EVENT_LOOP_FD_READ){
 	            fd_node->reader_callback = fd_node->reader_arg = NULL;
 		}
@@ -304,7 +304,7 @@ static void event_loop_remove_event(struct event_loop *ev, int fd, int event_typ
 	            if(fd_node->event_type & EVENT_LOOP_FD_WRITE){
                         epoll_event.events |= EPOLLOUT;
                     }
-                    epoll_event.events |= EPOLLRDHUP | EPOLLET;
+                    epoll_event.events |= (EPOLLRDHUP | EPOLLET);
                     epoll_event.data.fd = fd;
 	            epoll_ctl(ev->epollfd, EPOLL_CTL_MOD, fd, &epoll_event);
 	            if(!hlist_unhashed(&(fd_node->hlist_ready_node))){
@@ -443,11 +443,11 @@ loop_ready:
     for(n = 0; n < EVENT_LOOP_READY_FD_HASH_SIZE; n++){
         head = &ev->ready_fd_hash[n];
         hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
-	    if(fd_node->ready_event_type & EVENT_LOOP_FD_READ && fd_node->reader_callback){
+	    if((fd_node->ready_event_type & EVENT_LOOP_FD_READ) && fd_node->reader_callback){
                 fd_node->reader_callback(ev, fd_node->fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
 	        goto loop_ready;
 	    }
-	    if(fd_node->ready_event_type & EVENT_LOOP_FD_WRITE && fd_node->writer_callback){
+	    if((fd_node->ready_event_type & EVENT_LOOP_FD_WRITE) && fd_node->writer_callback){
                 fd_node->writer_callback(ev, fd_node->fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
 	        goto loop_ready;
 	    }
@@ -479,8 +479,8 @@ loop_ready:
             origin_event_type = event_type;
             hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
                 if(fd_node->fd == fd){
-		    event_type &= ~EVENT_LOOP_FD_READ;
-	            if(origin_event_type & EVENT_LOOP_FD_READ && fd_node->reader_callback){
+		    event_type &= (~EVENT_LOOP_FD_READ);
+	            if((origin_event_type & EVENT_LOOP_FD_READ) && fd_node->reader_callback){
 		        fd_node->ready_event_type |= EVENT_LOOP_FD_READ;
 		        if(hlist_unhashed(&(fd_node->hlist_ready_node))){
                             hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
@@ -488,8 +488,8 @@ loop_ready:
                         fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
 			goto loop_fd;
 	            }
-		    event_type &= ~EVENT_LOOP_FD_WRITE;
-	            if(origin_event_type & EVENT_LOOP_FD_WRITE && fd_node->writer_callback){
+		    event_type &= (~EVENT_LOOP_FD_WRITE);
+	            if((origin_event_type & EVENT_LOOP_FD_WRITE) && fd_node->writer_callback){
 		        fd_node->ready_event_type |= EVENT_LOOP_FD_WRITE;
 		        if(hlist_unhashed(&(fd_node->hlist_ready_node))){
                             hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
@@ -527,7 +527,7 @@ static int event_loop_accept(struct event_loop *ev, int sockfd, struct sockaddr 
         head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
         hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
 	    if(fd_node->fd == sockfd){
-                fd_node->ready_event_type &= ~EVENT_LOOP_FD_READ;
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_READ);
 		if(!fd_node->ready_event_type){
                     hlist_del(&(fd_node->hlist_ready_node));
 		}
@@ -547,7 +547,7 @@ static int event_loop_accept4(struct event_loop *ev, int sockfd, struct sockaddr
         head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
         hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
 	    if(fd_node->fd == sockfd){
-                fd_node->ready_event_type &= ~EVENT_LOOP_FD_READ;
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_READ);
 		if(!fd_node->ready_event_type){
                     hlist_del(&(fd_node->hlist_ready_node));
 		}
@@ -567,7 +567,7 @@ static ssize_t event_loop_read(struct event_loop *ev, int fd, void *buf, size_t 
         head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)];
         hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
 	    if(fd_node->fd == fd){
-                fd_node->ready_event_type &= ~EVENT_LOOP_FD_READ;
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_READ);
 		if(!fd_node->ready_event_type){
                     hlist_del(&(fd_node->hlist_ready_node));
 		}
@@ -587,7 +587,7 @@ static ssize_t event_loop_write(struct event_loop *ev, int fd, const void *buf, 
         head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)];
         hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
 	    if(fd_node->fd == fd){
-                fd_node->ready_event_type &= ~EVENT_LOOP_FD_WRITE;
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_WRITE);
 		if(!fd_node->ready_event_type){
                     hlist_del(&(fd_node->hlist_ready_node));
 		}
