@@ -20,6 +20,7 @@ static int event_loop_accept4(struct event_loop *ev, int sockfd, struct sockaddr
 static ssize_t event_loop_read(struct event_loop *ev, int fd, void *buf, size_t count);
 static ssize_t event_loop_write(struct event_loop *ev, int fd, const void *buf, size_t count);
 static int event_loop_poll(struct event_loop *ev, int timeout);
+static int event_loop_epoll_wait(struct event_loop *ev, int timeout);
 static int event_loop_add_reader(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
 static void event_loop_remove_reader(struct event_loop *ev, int fd);
 static int event_loop_add_writer(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
@@ -439,13 +440,11 @@ static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct eve
 }
 
 static int event_loop_poll(struct event_loop *ev, int timeout){
-    int nfds, n, fd, events, event_type, origin_event_type;
+    int nfds;
     struct event_loop_fd_node *fd_node;
     struct event_loop_defer_node *cur_defer, *next_defer;
-    struct hlist_node *cur, *next;
-    struct hlist_head *head; 
     ev->recursive_depth += 1;
-    while(!list_empty(&(ev->ready_fd_head))){
+    while((event_loop_epoll_wait(ev, 0), 1) && !list_empty(&(ev->ready_fd_head))){
         fd_node = list_entry(ev->ready_fd_head.next, typeof(*fd_node), list_ready_node);
 	list_move_before(ev->ready_fd_head.next, &(ev->ready_fd_head));
 	if(!fd_node->last_ready_flag){
@@ -470,57 +469,7 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
 	    }
 	}
     }
-    nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout);
-    if(nfds > 0){
-        for(n = 0; n < nfds; n++){
-            event_type = 0;
-            fd = ev->events[n].data.fd;
-	    events = ev->events[n].events;
-	    if(events & EPOLLIN){
-                event_type |= EVENT_LOOP_FD_READ;
-	    }
-	    if(events & EPOLLOUT){
-                event_type |= EVENT_LOOP_FD_WRITE;
-	    }
-	    if(events & EPOLLRDHUP){
-                event_type |= EVENT_LOOP_FD_READ;
-	    }
-	    if(events & EPOLLERR){
-                event_type |= EVENT_LOOP_FD_READ;
-	    }
-	    if(events & EPOLLHUP){
-                event_type |= EVENT_LOOP_FD_READ;
-	    }
-            head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
-      loop_fd:
-            origin_event_type = event_type;
-            hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
-                if(fd_node->fd == fd){
-		    event_type &= (~EVENT_LOOP_FD_READ);
-	            if((origin_event_type & EVENT_LOOP_FD_READ) && fd_node->reader_callback){
-		        fd_node->ready_event_type |= EVENT_LOOP_FD_READ;
-		        if(hlist_unhashed(&(fd_node->hlist_ready_node))){
-                            hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
-                            list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
-		        }
-                        fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
-			goto loop_fd;
-	            }
-		    event_type &= (~EVENT_LOOP_FD_WRITE);
-	            if((origin_event_type & EVENT_LOOP_FD_WRITE) && fd_node->writer_callback){
-		        fd_node->ready_event_type |= EVENT_LOOP_FD_WRITE;
-		        if(hlist_unhashed(&(fd_node->hlist_ready_node))){
-                            hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
-                            list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
-		        }
-                        fd_node->writer_callback(ev, fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
-			goto loop_fd;
-	            }
-		    break;
-	        }
-            }
-	}
-    }
+    nfds = event_loop_epoll_wait(ev, timeout);
     list_join(&(ev->defer_head), &(ev->tmp_defer_head));
     list_for_each_entry_safe(cur_defer, next_defer, &(ev->tmp_defer_head), list_node) {
 	list_del(&cur_defer->list_node);
@@ -533,6 +482,66 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
     ev->recursive_depth -= 1;
     if(!ev->recursive_depth && ev->defer_free){
         free_event_loop(ev); 
+    }
+    return nfds;
+}
+
+static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
+    int nfds, n, fd, events, event_type, origin_event_type;
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout);
+    if(nfds <= 0){
+        return nfds;
+    }
+    for(n = 0; n < nfds; n++){
+        event_type = 0;
+        fd = ev->events[n].data.fd;
+        events = ev->events[n].events;
+        if(events & EPOLLIN){
+            event_type |= EVENT_LOOP_FD_READ;
+        }
+        if(events & EPOLLOUT){
+            event_type |= EVENT_LOOP_FD_WRITE;
+        }
+        if(events & EPOLLRDHUP){
+            event_type |= EVENT_LOOP_FD_READ;
+        }
+        if(events & EPOLLERR){
+            event_type |= EVENT_LOOP_FD_READ;
+        }
+        if(events & EPOLLHUP){
+            event_type |= EVENT_LOOP_FD_READ;
+        }
+        head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
+    loop_fd:
+        origin_event_type = event_type;
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
+            if(fd_node->fd == fd){
+    	        event_type &= (~EVENT_LOOP_FD_READ);
+                if((origin_event_type & EVENT_LOOP_FD_READ) && fd_node->reader_callback){
+    	            fd_node->ready_event_type |= EVENT_LOOP_FD_READ;
+    	            if(hlist_unhashed(&(fd_node->hlist_ready_node))){
+                        hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
+                        list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
+    	            }
+                    fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
+    		    goto loop_fd;
+                }
+    	        event_type &= (~EVENT_LOOP_FD_WRITE);
+                if((origin_event_type & EVENT_LOOP_FD_WRITE) && fd_node->writer_callback){
+    	            fd_node->ready_event_type |= EVENT_LOOP_FD_WRITE;
+    	            if(hlist_unhashed(&(fd_node->hlist_ready_node))){
+                        hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
+                        list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
+    	            }
+                    fd_node->writer_callback(ev, fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
+    		    goto loop_fd;
+                }
+    	        break;
+            }
+        }
     }
     return nfds;
 }
