@@ -29,6 +29,7 @@ struct event_loop {
     struct epoll_event events[EVENT_LOOP_MAX_EVENTS];
     struct hlist_head fd_hash[EVENT_LOOP_FD_HASH_SIZE];
     struct hlist_head ready_fd_hash[EVENT_LOOP_READY_FD_HASH_SIZE];
+    struct list_head ready_fd_head;
     struct list_head defer_head;
     struct list_head tmp_defer_head;
     struct list_head signal_head;
@@ -73,7 +74,9 @@ struct event_loop_signal_node {
 struct event_loop_fd_node {
     struct hlist_node hlist_node;
     struct hlist_node hlist_ready_node;
+    struct list_head list_ready_node;
     int ready_event_type;
+    int last_ready_flag;
     int fd;
     int event_type;
     void (*reader_callback)(struct event_loop *ev, int fd, int event_type, void *arg);
