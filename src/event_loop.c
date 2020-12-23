@@ -500,7 +500,7 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
 }
 
 static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
-    int nfds, n, fd, events, event_type, origin_event_type;
+    int nfds, n, fd, events, event_type, left_event_type;
     struct event_loop_fd_node *fd_node;
     struct hlist_node *cur, *next;
     struct hlist_head *head; 
@@ -529,11 +529,11 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
         }
         head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
         loop_fd:
-        origin_event_type = event_type;
+        left_event_type = event_type;
         hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
             if(fd_node->fd == fd){
     	        event_type &= (~EVENT_LOOP_FD_READ);
-                if(origin_event_type & EVENT_LOOP_FD_READ){
+                if((left_event_type & EVENT_LOOP_FD_READ) && (fd_node->event_type & EVENT_LOOP_FD_READ)){
     	            fd_node->ready_event_type |= EVENT_LOOP_FD_READ;
     	            if(hlist_unhashed(&(fd_node->hlist_ready_node))){
                         hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
@@ -543,7 +543,7 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
     		    goto loop_fd;
                 }
     	        event_type &= (~EVENT_LOOP_FD_WRITE);
-                if(origin_event_type & EVENT_LOOP_FD_WRITE){
+                if((left_event_type & EVENT_LOOP_FD_WRITE) && (fd_node->event_type & EVENT_LOOP_FD_WRITE)){
     	            fd_node->ready_event_type |= EVENT_LOOP_FD_WRITE;
     	            if(hlist_unhashed(&(fd_node->hlist_ready_node))){
                         hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
