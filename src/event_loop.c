@@ -534,7 +534,11 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
                         list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
     	            }
                     fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
-                    goto loop_fd;
+                    if(event_type){
+                        goto loop_fd;
+                    } else {
+                        break;
+                    }
                 }
     	        event_type &= (~EVENT_LOOP_FD_WRITE);
                 if((left_event_type & EVENT_LOOP_FD_WRITE) && (fd_node->event_type & EVENT_LOOP_FD_WRITE)){
@@ -544,7 +548,11 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
                         list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
     	            }
                     fd_node->writer_callback(ev, fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
-                    goto loop_fd;
+                    if(event_type){
+                        goto loop_fd;
+                    } else {
+                        break;
+                    }
                 }
     	        break;
             }
