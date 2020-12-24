@@ -518,43 +518,38 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
         if(events & EPOLLOUT){
             event_type |= EVENT_LOOP_FD_WRITE;
         }
-        if(events & EPOLLRDHUP){
-            event_type |= EVENT_LOOP_FD_READ;
-        }
-        if(events & EPOLLERR){
-            event_type |= EVENT_LOOP_FD_READ;
-        }
-        if(events & EPOLLHUP){
-            event_type |= EVENT_LOOP_FD_READ;
+        if(events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)){
+            event_type |= (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
         }
         head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
-        loop_fd:
-        left_event_type = event_type;
-        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
-            if(fd_node->fd == fd){
-    	        event_type &= (~EVENT_LOOP_FD_READ);
-                if((left_event_type & EVENT_LOOP_FD_READ) && (fd_node->event_type & EVENT_LOOP_FD_READ)){
-    	            fd_node->ready_event_type |= EVENT_LOOP_FD_READ;
-    	            if(hlist_unhashed(&(fd_node->hlist_ready_node))){
-                        hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
-                        list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
-    	            }
-                    fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
-    		    goto loop_fd;
+        do{
+            left_event_type = event_type;
+            hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_node){
+                if(fd_node->fd == fd){
+    	            event_type &= (~EVENT_LOOP_FD_READ);
+                    if((left_event_type & EVENT_LOOP_FD_READ) && (fd_node->event_type & EVENT_LOOP_FD_READ)){
+    	                fd_node->ready_event_type |= EVENT_LOOP_FD_READ;
+    	                if(hlist_unhashed(&(fd_node->hlist_ready_node))){
+                            hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
+                            list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
+    	                }
+                        fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
+                        break;
+                    }
+    	            event_type &= (~EVENT_LOOP_FD_WRITE);
+                    if((left_event_type & EVENT_LOOP_FD_WRITE) && (fd_node->event_type & EVENT_LOOP_FD_WRITE)){
+    	                fd_node->ready_event_type |= EVENT_LOOP_FD_WRITE;
+    	                if(hlist_unhashed(&(fd_node->hlist_ready_node))){
+                            hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
+                            list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
+    	                }
+                        fd_node->writer_callback(ev, fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
+                        break;
+                    }
+    	            break;
                 }
-    	        event_type &= (~EVENT_LOOP_FD_WRITE);
-                if((left_event_type & EVENT_LOOP_FD_WRITE) && (fd_node->event_type & EVENT_LOOP_FD_WRITE)){
-    	            fd_node->ready_event_type |= EVENT_LOOP_FD_WRITE;
-    	            if(hlist_unhashed(&(fd_node->hlist_ready_node))){
-                        hlist_add_head(&(fd_node->hlist_ready_node), &(ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)]));
-                        list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
-    	            }
-                    fd_node->writer_callback(ev, fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
-    		    goto loop_fd;
-                }
-    	        break;
             }
-        }
+        } while(event_type);
     }
     return nfds;
 }
