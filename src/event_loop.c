@@ -512,14 +512,11 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
         event_type = 0;
         fd = ev->events[n].data.fd;
         events = ev->events[n].events;
-        if(events & EPOLLIN){
+        if(events & (EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLHUP)){
             event_type |= EVENT_LOOP_FD_READ;
         }
-        if(events & EPOLLOUT){
+        if(events & (EPOLLOUT | EPOLLERR | EPOLLHUP)){
             event_type |= EVENT_LOOP_FD_WRITE;
-        }
-        if(events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)){
-            event_type |= (EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
         }
         head = &(ev->fd_hash[EVENT_LOOP_FD_HASH(fd)]);
 	loop_fd:
