@@ -10,7 +10,6 @@
 #include <unistd.h>
 #include <stdint.h>
 #include "event_loop.h"
-#include "future.h"
 #include "hlist.h"
 
 static void event_loop_init(struct event_loop *ev);
@@ -441,21 +440,29 @@ static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct eve
 }
 
 static int event_loop_poll(struct event_loop *ev, int timeout){
-    int nfds;
+    int nfds, epoll_wait_ret, run_callback_count = 0;
     uint64_t ready_loop_id;
     struct event_loop_fd_node *fd_node;
     struct event_loop_defer_node *cur_defer, *next_defer;
     ev->recursive_depth += 1;
     if(!list_empty(&(ev->ready_fd_head)) && (ev->recursive_depth & 1)){
-        event_loop_epoll_wait(ev, 0);
+        epoll_wait_ret = event_loop_epoll_wait(ev, 0);
+        if(epoll_wait_ret < 0){
+            return epoll_wait_ret;
+        }
+        run_callback_count += epoll_wait_ret;
     }
     ready_loop_id = ev->ready_loop_id++;
     while(!list_empty(&(ev->ready_fd_head))){
         fd_node = list_entry(ev->ready_fd_head.next, typeof(*fd_node), list_ready_node);
 	if(fd_node->ready_loop_id == ready_loop_id){
-            event_loop_epoll_wait(ev, 0);
-	    ready_loop_id = ev->ready_loop_id++;
-	    continue;
+            epoll_wait_ret = event_loop_epoll_wait(ev, 0);
+            if(epoll_wait_ret < 0){
+                return epoll_wait_ret;
+            }
+            run_callback_count += epoll_wait_ret;
+            ready_loop_id = ev->ready_loop_id++;
+            continue;
 	} else {
 	    fd_node->ready_loop_id = ready_loop_id;
 	}
@@ -464,28 +471,41 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
 	    fd_node->last_ready_flag = 1;
 	    if(fd_node->ready_event_type & EVENT_LOOP_FD_READ){
                 fd_node->reader_callback(ev, fd_node->fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
+                run_callback_count++;
 	        continue;
 	    }
 	    if(fd_node->ready_event_type & EVENT_LOOP_FD_WRITE){
                 fd_node->writer_callback(ev, fd_node->fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
+                run_callback_count++;
 		continue;
 	    }
 	} else {  
 	    fd_node->last_ready_flag = 0;
 	    if(fd_node->ready_event_type & EVENT_LOOP_FD_WRITE){
                 fd_node->writer_callback(ev, fd_node->fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
+                run_callback_count++;
 		continue;
 	    }
 	    if(fd_node->ready_event_type & EVENT_LOOP_FD_READ){
                 fd_node->reader_callback(ev, fd_node->fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
+                run_callback_count++;
 	        continue;
 	    }
 	}
     }
-    nfds = event_loop_epoll_wait(ev, timeout);
+    if(!list_empty(&(ev->defer_head))){
+        epoll_wait_ret = event_loop_epoll_wait(ev, 0);
+    } else {
+        epoll_wait_ret = event_loop_epoll_wait(ev, timeout);
+    }
+    if(epoll_wait_ret < 0){
+        return epoll_wait_ret;
+    }
+    run_callback_count += epoll_wait_ret;
     list_join(&(ev->defer_head), &(ev->tmp_defer_head));
     list_for_each_entry_safe(cur_defer, next_defer, &(ev->tmp_defer_head), list_node) {
 	list_del(&cur_defer->list_node);
+        run_callback_count++;
         if(!cur_defer->callback(ev, cur_defer->arg)){
             free(cur_defer);
 	} else {
@@ -496,11 +516,11 @@ static int event_loop_poll(struct event_loop *ev, int timeout){
     if(!ev->recursive_depth && ev->defer_free){
         free_event_loop(ev); 
     }
-    return nfds;
+    return run_callback_count;
 }
 
 static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
-    int nfds, n, fd, events, event_type, left_event_type;
+    int nfds, n, fd, events, event_type, left_event_type, run_callback_count = 0;
     struct event_loop_fd_node *fd_node;
     struct hlist_node *cur, *next;
     struct hlist_head *head; 
@@ -531,6 +551,7 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
                         list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
     	            }
                     fd_node->reader_callback(ev, fd, EVENT_LOOP_FD_READ, fd_node->reader_arg);
+		    run_callback_count++;
                     if(event_type){
                         goto loop_fd;
                     } else {
@@ -545,6 +566,7 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
                         list_add_before(&(fd_node->list_ready_node), &(ev->ready_fd_head));
     	            }
                     fd_node->writer_callback(ev, fd, EVENT_LOOP_FD_WRITE, fd_node->writer_arg);
+		    run_callback_count++;
                     if(event_type){
                         goto loop_fd;
                     } else {
@@ -555,7 +577,7 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
             }
         }
     }
-    return nfds;
+    return run_callback_count;
 }
 
 static int event_loop_accept(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen){
