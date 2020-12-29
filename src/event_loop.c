@@ -105,7 +105,7 @@ static void event_loop_signalfd_callback(struct event_loop *ev, int fd, int even
     while(ev->read(ev, fd, &fdsi, sizeof(struct signalfd_siginfo)) > 0){
         list_for_each_entry_safe(cur, next, &(ev->signal_head), list_node) {
             if(cur->signo == fdsi.ssi_signo){
-	        cur->callback(ev, cur->signo, arg);
+	        cur->callback(ev, cur->signo, cur->arg);
                 break;
 	    }
         }

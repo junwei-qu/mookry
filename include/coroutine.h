@@ -14,5 +14,6 @@ ssize_t co_read(int fd, void *buf, size_t count);
 int co_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 int co_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
 void co_sleep(float seconds);
+void co_wait_signal(int signo);
 
 #endif
