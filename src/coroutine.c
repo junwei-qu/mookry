@@ -1,6 +1,8 @@
+#define _GNU_SOURCE
 #include <sys/mman.h>
 #include <errno.h>
 #include <assert.h>
+#include <signal.h>
 #include "coroutine.h"
 #include "event_loop.h"
 #include "list.h"
@@ -14,6 +16,13 @@ struct coroutine {
     void *mem_base;
     int mem_size;
 };
+
+struct co_signal_arg {
+    int signo;
+    void(*handler)(int signo, void *arg);
+    void *arg;
+} co_signal_args[_NSIG+1];
+static sigset_t signal_set;
 
 struct event_loop *main_event_loop;
 struct coroutine  main_coroutine;
@@ -30,16 +39,19 @@ static inline struct coroutine *resume_coroutine(struct coroutine *coroutine);
 static inline struct coroutine *yield_coroutine();
 static inline void reader_writer_callback(struct event_loop *ev, int fd, int event_type, void *coroutine);
 static inline int sleep_callback(struct event_loop *ev, uint64_t timer_id, void *coroutine);
-static inline void signal_callback(struct event_loop *ev, int singo, void *coroutine);
+static inline void signal_callback(struct event_loop *ev, int signo, void *arg);
+static inline void co_signal_callback(void *arg);
 
 int enter_coroutine_environment(void (*co_start)(void *), void *arg);
 void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
 ssize_t co_write(int fd, const void *buf, size_t count);
 ssize_t co_read(int fd, void *buf, size_t count);
+int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int co_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 int co_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
-void co_sleep(float seconds);
-void co_wait_signal(int signo);
+void co_sleep(double seconds);
+void co_add_signal(int signo, void(*handler)(int signo, void *arg), void *arg);
+void co_remove_signal(int signo);
 
 static inline void routine_start(struct coroutine *coroutine){
     coroutine->routine(coroutine->arg);
@@ -88,8 +100,13 @@ static inline int sleep_callback(struct event_loop *ev, uint64_t timer_id, void 
     return 0;
 }
 
-static inline void signal_callback(struct event_loop *ev, int singo, void *coroutine){
-    resume_coroutine(coroutine);
+static inline void co_signal_callback(void *arg) {
+    struct co_signal_arg *co_signal_arg = arg;
+    co_signal_arg->handler(co_signal_arg->signo, co_signal_arg->arg);
+}
+
+static inline void signal_callback(struct event_loop *ev, int singo, void *arg){
+    make_coroutine(0, co_signal_callback, arg);
 }
 
 int enter_coroutine_environment(void (*co_start)(void *), void *arg){
@@ -97,8 +114,9 @@ int enter_coroutine_environment(void (*co_start)(void *), void *arg){
     int ret = 0;
     struct coroutine *cur, *next;
     main_event_loop = alloc_event_loop();
+    sigemptyset(&signal_set);
     make_coroutine(0, co_start, arg);
-    while(coroutine_count && ret >= 0){
+    while((!sigisemptyset(&signal_set) || coroutine_count) && ret >= 0){
         while(!list_empty(&ready_co_head)){
            list_for_each_entry_safe(cur, next, &ready_co_head, list_node) {
 	       resume_coroutine(cur);
@@ -167,6 +185,27 @@ ssize_t co_read(int fd, void *buf, size_t count){
     return ret;
 }
 
+int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen){
+    assert(main_event_loop);
+    int ret, optval;
+    socklen_t optlen = sizeof(optval);
+    ret = connect(sockfd, addr, addrlen);
+    if(ret == -1 && (errno == EAGAIN || errno == EINPROGRESS)){
+	main_event_loop->add_writer(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
+	yield_coroutine();
+	main_event_loop->remove_writer(main_event_loop, sockfd);
+	optval = 0;
+	getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &optval, &optlen);
+	if(optval != 0){
+	    ret = -1;
+            errno = optval;
+	} else {
+            ret = 0;
+	}
+    }
+    return ret;
+}
+
 int co_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen){
     assert(main_event_loop);
     int ret;
@@ -195,7 +234,7 @@ int co_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
     return ret;
 }
 
-void co_sleep(float seconds){
+void co_sleep(double seconds){
     assert(main_event_loop);
     int integer_seconds = (int)(seconds);
     long nano_seconds = (long)((seconds - integer_seconds)* 1000000000);
@@ -206,9 +245,18 @@ void co_sleep(float seconds){
     yield_coroutine();
 }
 
-void co_wait_signal(int signo){
+void co_add_signal(int signo, void(*handler)(int signo, void *arg), void *arg){
     assert(main_event_loop);
-    main_event_loop->add_signal(main_event_loop, signo, signal_callback, cur_coroutine);
-    yield_coroutine();
+    struct co_signal_arg * co_signal_arg = co_signal_args + signo;
+    co_signal_arg->signo = signo;
+    co_signal_arg->handler = handler;
+    co_signal_arg->arg = arg;
+    main_event_loop->add_signal(main_event_loop, signo, signal_callback, co_signal_arg);
+    sigaddset(&signal_set, signo);
+}
+
+void co_remove_signal(int signo){
+    assert(main_event_loop);
     main_event_loop->remove_signal(main_event_loop, signo);
+    sigdelset(&signal_set, signo);
 }
