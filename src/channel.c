@@ -4,10 +4,7 @@
 #include <stdlib.h>
 #include "hlist.h"
 #include "list.h"
-
-#define CHANNEL_ID_HASH_SIZE 64
-#define CHANNEL_NAME_HASH_SIZE 64
-#define CHANNEL_NAME_SIZE   64
+#include "channel.h"
 
 struct channel_pool *alloc_channel_pool();
 void free_channel_pool(struct channel_pool *channel_pool);
@@ -21,23 +18,8 @@ static ssize_t channel_pool_receive(struct channel_pool *channel_pool, int64_t c
 static ssize_t channel_pool_send(struct channel_pool *channel_pool, int64_t channel_id, const char *msg_ptr, size_t msg_len);
 static int channel_pool_isempty(struct channel_pool *channel_pool, int64_t channel_id);
 static int channel_pool_isfull(struct channel_pool *channel_pool, int64_t channel_id);
-
-struct channel;
-
-struct channel_pool {
-    int64_t source_id;
-    struct hlist_head id_hash[CHANNEL_ID_HASH_SIZE];
-    struct hlist_head name_hash[CHANNEL_NAME_HASH_SIZE];
-    void (*init)(struct channel_pool *channel_pool);
-    void (*destruct)(struct channel_pool *channel_pool);
-    int64_t (*open)(struct channel_pool *channel_pool, char *name, int msgsize, int maxmsg);
-    void (*close)(struct channel_pool *channel_pool, int64_t channel_id);
-    void (*unlink)(struct channel_pool *channel_pool, char *name);
-    ssize_t (*receive)(struct channel_pool *channel_pool, int64_t channel_id, char *msg_ptr, size_t msg_len);
-    ssize_t (*send)(struct channel_pool *channel_pool, int64_t channel_id, const char *msg_ptr, size_t msg_len);
-    int (*isempty)(struct channel_pool *channel_pool, int64_t channel_id);
-    int (*isfull)(struct channel_pool *channel_pool, int64_t channel_id);
-};
+static int channel_pool_getname(struct channel_pool *channel_pool, int64_t channel_id, char *buf, size_t buf_len);
+static int channel_pool_getmsgsize(struct channel_pool *channel_pool, int64_t channel_id);
 
 struct channel {
     struct hlist_node name_node;
@@ -83,6 +65,8 @@ struct channel_pool *alloc_channel_pool(){
     channel_pool->receive = channel_pool_receive;
     channel_pool->isempty = channel_pool_isempty;
     channel_pool->isfull = channel_pool_isfull;
+    channel_pool->getname = channel_pool_getname;
+    channel_pool->getmsgsize = channel_pool_getmsgsize;
     channel_pool->init(channel_pool);
     return channel_pool;
 }
@@ -145,19 +129,19 @@ static int64_t channel_pool_open(struct channel_pool *channel_pool, char *name, 
     }
     if(!find_channel){
         find_channel = calloc(1, sizeof(struct channel));
-        strcpy(channel->name, name);
-        INIT_LIST_HEAD(&(channel->list_head));
-        channel->msgsize = msgsize;
-        channel->maxmsg = maxmsg;
-        channel->curmsgs = 0;
-        channel->unlinked = 0;
-        channel->refcnt = 0;
-        hlist_add_head(&(channel->name_node), head);
+        strcpy(find_channel->name, name);
+        INIT_LIST_HEAD(&(find_channel->list_head));
+        find_channel->msgsize = msgsize;
+        find_channel->maxmsg = maxmsg;
+        find_channel->curmsgs = 0;
+        find_channel->unlinked = 0;
+        find_channel->refcnt = 0;
+        hlist_add_head(&(find_channel->name_node), head);
     }
     struct id_name_node *id_name_node = calloc(1, sizeof(struct id_name_node));
     id_name_node->id = channel_pool->source_id++;
     id_name_node->channel = find_channel;
-    channel->refcnt++;
+    find_channel->refcnt++;
     hlist_add_head(&(id_name_node->id_node), &(channel_pool->id_hash[id_name_node->id & (CHANNEL_ID_HASH_SIZE - 1)]));
     return id_name_node->id;
 }
@@ -299,4 +283,38 @@ static int channel_pool_isfull(struct channel_pool *channel_pool, int64_t channe
 	    }
 	}
     }
+}
+
+static int channel_pool_getname(struct channel_pool *channel_pool, int64_t channel_id, char *buf, size_t buf_len){
+    struct hlist_head *head;
+    struct hlist_node *cur, *next;
+    struct id_name_node *id_name_node;
+    struct channel *channel;
+    head = &channel_pool->id_hash[channel_id & (CHANNEL_ID_HASH_SIZE - 1)];
+    hlist_for_each_entry_safe(id_name_node, cur, next, head, id_node){
+        if(channel_id == id_name_node->id) {
+            channel = id_name_node->channel;
+	    if(strlen(channel->name) + 1 > buf_len) {
+                return -1;
+	    }
+	    strcpy(buf, channel->name);
+	    return 0;
+	}
+    }
+    return -1;
+}
+
+static int channel_pool_getmsgsize(struct channel_pool *channel_pool, int64_t channel_id){
+    struct hlist_head *head;
+    struct hlist_node *cur, *next;
+    struct id_name_node *id_name_node;
+    struct channel *channel;
+    head = &channel_pool->id_hash[channel_id & (CHANNEL_ID_HASH_SIZE - 1)];
+    hlist_for_each_entry_safe(id_name_node, cur, next, head, id_node){
+        if(channel_id == id_name_node->id) {
+            channel = id_name_node->channel;
+	    return channel->msgsize;
+	}
+    }
+    return -1;
 }

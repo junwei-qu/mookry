@@ -17,5 +17,10 @@ int co_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
 void co_sleep(double seconds);
 void co_add_signal(int signo, void(*handler)(int signo, void *arg), void *arg);
 void co_remove_signal(int signo);
+int channel_send(int64_t channel_id, const char *msg_ptr, size_t msg_len, double timeout);
+int channel_receive(int64_t channel_id, char *msg_ptr, size_t msg_len, double timeout);
+void channel_unlink(char *name);
+void channel_close(int64_t channel_id);
+int64_t channel_open(char *name, int msgsize, int maxmsg);
 
 #endif
