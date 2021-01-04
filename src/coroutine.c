@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
 #include <sys/mman.h>
+#include <sys/time.h>
+#include <time.h>
 #include <errno.h>
 #include <assert.h>
 #include <signal.h>
@@ -12,6 +14,7 @@
 
 #define COROUTINE_CHANNEL_HASH_SIZE 64
 #define WAITING_COROUTINE_HASH_SIZE 64
+#define PREEMPT_RESUME_SIGNO SIGRTMIN
 
 struct coroutine {
     struct list_head list_node;
@@ -19,6 +22,9 @@ struct coroutine {
     void *arg;
     void *stack_pointer;
     int stack_size;
+    gregset_t gregs;
+    typeof(*((fpregset_t)(0))) fpregs;
+    struct timespec resume_time;
     void *mem_base;
     int mem_size;
     struct hlist_head channels[COROUTINE_CHANNEL_HASH_SIZE];
@@ -70,6 +76,9 @@ static inline void signal_callback(struct event_loop *ev, int signo, void *arg);
 static inline void co_signal_callback(void *arg);
 static struct waiting_node *find_waiting_node(int64_t channel_id, int create);
 static inline uint32_t channel_name_hash(char *name, int len);
+static inline void preempt_resume(int signo, siginfo_t *siginfo, void *arg);
+static inline void preempt_check(int signo, siginfo_t *siginfo, void *arg);
+static inline void preempt_coroutine();
 
 int enter_coroutine_environment(void (*co_start)(void *), void *arg);
 void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
@@ -87,9 +96,47 @@ void channel_unlink(char *name);
 void channel_close(int64_t channel_id);
 int64_t channel_open(char *name, int msgsize, int maxmsg);
 
+static inline void preempt_resume(int signo, siginfo_t *siginfo, void *arg){
+    ucontext_t *context = arg;
+    memcpy(context->uc_mcontext.gregs, cur_coroutine->gregs, sizeof(cur_coroutine->gregs));
+    memcpy(context->uc_mcontext.fpregs, &(cur_coroutine->fpregs), sizeof(cur_coroutine->fpregs));
+}
+
+static inline void preempt_check(int signo, siginfo_t *siginfo, void *arg){
+    if(cur_coroutine != &main_coroutine && (cur_coroutine->resume_time.tv_sec || cur_coroutine->resume_time.tv_nsec)){
+        struct timespec cur_time, delta_time;
+	long min_time_delta = 10000000;
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &cur_time);
+	delta_time.tv_sec = cur_time.tv_sec - cur_coroutine->resume_time.tv_sec;
+	if(cur_time.tv_nsec < cur_coroutine->resume_time.tv_nsec){
+            delta_time.tv_sec -= 1;
+	    delta_time.tv_nsec = cur_time.tv_nsec + 1000000000 - cur_coroutine->resume_time.tv_nsec;
+	} else {
+	    delta_time.tv_nsec = cur_time.tv_nsec - cur_coroutine->resume_time.tv_nsec;
+	}
+	if(delta_time.tv_sec > 0 || delta_time.tv_nsec >= min_time_delta){
+            ucontext_t *context = arg;
+            memcpy(cur_coroutine->gregs, context->uc_mcontext.gregs, sizeof(cur_coroutine->gregs));
+            memcpy(&(cur_coroutine->fpregs), context->uc_mcontext.fpregs, sizeof(cur_coroutine->fpregs));
+            context->uc_mcontext.gregs[REG_RIP] = (long)preempt_coroutine;
+	}
+    }
+}
+
+static inline void preempt_coroutine(){
+    co_sleep(0);
+    kill(getpid(), PREEMPT_RESUME_SIGNO);
+}
+
 static inline void routine_start(struct coroutine *coroutine){
     int i;
+    sigset_t sigset;
     cur_coroutine = coroutine;
+    sigemptyset(&sigset);
+    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
+    sigaddset(&sigset, SIGPROF);
+    sigprocmask(SIG_UNBLOCK, &sigset, NULL);
+
     for(i = 0; i < COROUTINE_CHANNEL_HASH_SIZE; i++){
         INIT_HLIST_HEAD(&coroutine->channels[i]);
     }
@@ -125,21 +172,44 @@ static inline void destroy_coroutine(struct coroutine* coroutine){
 
 static inline void resume_coroutine(struct coroutine *coroutine){
     assert(cur_coroutine != coroutine);
+    sigset_t sigset;
+    sigemptyset(&sigset);
+    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
+    sigaddset(&sigset, SIGPROF);
+    sigprocmask(SIG_BLOCK, &sigset, NULL);
+
     if((cur_coroutine != &main_coroutine) && list_empty(&(cur_coroutine->list_node))){
         list_add_before(&(cur_coroutine->list_node), &ready_co_head);
     }
     if((coroutine != &main_coroutine) && list_empty(&(coroutine->list_node))){
         list_add_before(&(coroutine->list_node), &ready_co_head);
     }
+    if(cur_coroutine != &main_coroutine){
+        memset(&(cur_coroutine->resume_time), 0, sizeof(cur_coroutine->resume_time));
+    }
+    if(coroutine != &main_coroutine){
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &(coroutine->resume_time));
+    }
     cur_coroutine = jump_fcontext(&(cur_coroutine->stack_pointer), coroutine->stack_pointer, coroutine, 1);
+
+    sigprocmask(SIG_UNBLOCK, &sigset, NULL);
 }
 
 static inline void yield_coroutine(){
     assert(cur_coroutine != &main_coroutine);
+    sigset_t sigset;
+    sigemptyset(&sigset);
+    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
+    sigaddset(&sigset, SIGPROF);
+    sigprocmask(SIG_BLOCK, &sigset, NULL);
+
     if(!list_empty(&(cur_coroutine->list_node))){
         list_del(&(cur_coroutine->list_node));
     }
+    memset(&(cur_coroutine->resume_time), 0, sizeof(cur_coroutine->resume_time));
     cur_coroutine = jump_fcontext(&(cur_coroutine->stack_pointer), main_coroutine.stack_pointer, &main_coroutine, 1);
+
+    sigprocmask(SIG_UNBLOCK, &sigset, NULL);
 }
 
 static inline void reader_writer_callback(struct event_loop *ev, int fd, int event_type, void *coroutine){
@@ -203,6 +273,28 @@ int enter_coroutine_environment(void (*co_start)(void *), void *arg){
         INIT_HLIST_HEAD(&waiting_coroutine_hash[i]);
     }
 
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(struct sigaction));
+    sa.sa_sigaction = preempt_check;
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, PREEMPT_RESUME_SIGNO);
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigaction(SIGPROF, &sa, NULL);
+
+    memset(&sa, 0, sizeof(struct sigaction));
+    sa.sa_sigaction = preempt_resume;
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGPROF);
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigaction(PREEMPT_RESUME_SIGNO, &sa, NULL);
+
+    struct itimerval itimerval;
+    memset(&itimerval, 0, sizeof(struct itimerval));
+    itimerval.it_interval.tv_usec = 10000;
+    itimerval.it_value.tv_usec = 10000;
+    setitimer(ITIMER_PROF, &itimerval, NULL);
+
     make_coroutine(0, co_start, arg);
     while((!sigisemptyset(&signal_set) || coroutine_count) && ret >= 0){
         while(!list_empty(&ready_co_head)){
@@ -245,6 +337,7 @@ void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg){
     void *mem_base = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1 ,0);
     mprotect(mem_base, page_size, PROT_NONE);
     struct coroutine *coroutine = (struct coroutine *)((char *)mem_base + map_size - sizeof(struct coroutine));
+    memset(coroutine, 0, sizeof(struct coroutine));
     INIT_LIST_HEAD(&(coroutine->list_node));
     coroutine->mem_base = mem_base;
     coroutine->mem_size = map_size;
