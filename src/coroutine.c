@@ -173,10 +173,12 @@ static inline void destroy_coroutine(struct coroutine* coroutine){
 static inline void resume_coroutine(struct coroutine *coroutine){
     assert(cur_coroutine != coroutine);
     sigset_t sigset;
-    sigemptyset(&sigset);
-    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
-    sigaddset(&sigset, SIGPROF);
-    sigprocmask(SIG_BLOCK, &sigset, NULL);
+    if(cur_coroutine != &main_coroutine){
+        sigemptyset(&sigset);
+        sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
+        sigaddset(&sigset, SIGPROF);
+        sigprocmask(SIG_BLOCK, &sigset, NULL);
+    }
 
     if((cur_coroutine != &main_coroutine) && list_empty(&(cur_coroutine->list_node))){
         list_add_before(&(cur_coroutine->list_node), &ready_co_head);
@@ -192,7 +194,9 @@ static inline void resume_coroutine(struct coroutine *coroutine){
     }
     cur_coroutine = jump_fcontext(&(cur_coroutine->stack_pointer), coroutine->stack_pointer, coroutine, 1);
 
-    sigprocmask(SIG_UNBLOCK, &sigset, NULL);
+    if(cur_coroutine != &main_coroutine){
+        sigprocmask(SIG_UNBLOCK, &sigset, NULL);
+    }
 }
 
 static inline void yield_coroutine(){
@@ -273,6 +277,11 @@ int enter_coroutine_environment(void (*co_start)(void *), void *arg){
         INIT_HLIST_HEAD(&waiting_coroutine_hash[i]);
     }
 
+    sigset_t sigset;
+    sigemptyset(&sigset);
+    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
+    sigaddset(&sigset, SIGPROF);
+    sigprocmask(SIG_BLOCK, &sigset, NULL);
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(struct sigaction));
