@@ -14,7 +14,6 @@
 
 #define COROUTINE_CHANNEL_HASH_SIZE 64
 #define WAITING_COROUTINE_HASH_SIZE 64
-#define PREEMPT_RESUME_SIGNO SIGRTMIN
 
 struct coroutine {
     struct list_head list_node;
@@ -77,8 +76,10 @@ static inline void co_signal_callback(void *arg);
 static struct waiting_node *find_waiting_node(int64_t channel_id, int create);
 static inline uint32_t channel_name_hash(char *name, int len);
 static inline void preempt_resume(int signo, siginfo_t *siginfo, void *arg);
-static inline void preempt_check(int signo, siginfo_t *siginfo, void *arg);
+static inline void preempt_interrupt(int signo, siginfo_t *siginfo, void *arg);
 static inline void preempt_coroutine();
+static inline void enable_preempt_interrupt();
+static inline void disable_preempt_interrupt();
 
 int enter_coroutine_environment(void (*co_start)(void *), void *arg);
 void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
@@ -96,13 +97,26 @@ void channel_unlink(char *name);
 void channel_close(int64_t channel_id);
 int64_t channel_open(char *name, int msgsize, int maxmsg);
 
+static inline void enable_preempt_interrupt(){
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(struct sigaction));
+    sa.sa_sigaction = preempt_interrupt;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigaction(SIGPROF, &sa, NULL);
+}
+
+static inline void disable_preempt_interrupt(){
+    signal(SIGPROF, SIG_IGN);
+}
+
 static inline void preempt_resume(int signo, siginfo_t *siginfo, void *arg){
     ucontext_t *context = arg;
     memcpy(context->uc_mcontext.gregs, cur_coroutine->gregs, sizeof(cur_coroutine->gregs));
     memcpy(context->uc_mcontext.fpregs, &(cur_coroutine->fpregs), sizeof(cur_coroutine->fpregs));
 }
 
-static inline void preempt_check(int signo, siginfo_t *siginfo, void *arg){
+static inline void preempt_interrupt(int signo, siginfo_t *siginfo, void *arg){
     if(cur_coroutine != &main_coroutine && (cur_coroutine->resume_time.tv_sec || cur_coroutine->resume_time.tv_nsec)){
         struct timespec cur_time, delta_time;
 	long min_time_delta = 10000000;
@@ -125,18 +139,13 @@ static inline void preempt_check(int signo, siginfo_t *siginfo, void *arg){
 
 static inline void preempt_coroutine(){
     co_sleep(0);
-    kill(getpid(), PREEMPT_RESUME_SIGNO);
+    raise(SIGUSR1);
 }
 
 static inline void routine_start(struct coroutine *coroutine){
     int i;
-    sigset_t sigset;
     cur_coroutine = coroutine;
-    sigemptyset(&sigset);
-    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
-    sigaddset(&sigset, SIGPROF);
-    sigprocmask(SIG_UNBLOCK, &sigset, NULL);
-
+    enable_preempt_interrupt();
     for(i = 0; i < COROUTINE_CHANNEL_HASH_SIZE; i++){
         INIT_HLIST_HEAD(&coroutine->channels[i]);
     }
@@ -172,14 +181,9 @@ static inline void destroy_coroutine(struct coroutine* coroutine){
 
 static inline void resume_coroutine(struct coroutine *coroutine){
     assert(cur_coroutine != coroutine);
-    sigset_t sigset;
     if(cur_coroutine != &main_coroutine){
-        sigemptyset(&sigset);
-        sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
-        sigaddset(&sigset, SIGPROF);
-        sigprocmask(SIG_BLOCK, &sigset, NULL);
+        disable_preempt_interrupt();
     }
-
     if((cur_coroutine != &main_coroutine) && list_empty(&(cur_coroutine->list_node))){
         list_add_before(&(cur_coroutine->list_node), &ready_co_head);
     }
@@ -195,25 +199,19 @@ static inline void resume_coroutine(struct coroutine *coroutine){
     cur_coroutine = jump_fcontext(&(cur_coroutine->stack_pointer), coroutine->stack_pointer, coroutine, 1);
 
     if(cur_coroutine != &main_coroutine){
-        sigprocmask(SIG_UNBLOCK, &sigset, NULL);
+        enable_preempt_interrupt();
     }
 }
 
 static inline void yield_coroutine(){
     assert(cur_coroutine != &main_coroutine);
-    sigset_t sigset;
-    sigemptyset(&sigset);
-    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
-    sigaddset(&sigset, SIGPROF);
-    sigprocmask(SIG_BLOCK, &sigset, NULL);
-
+    disable_preempt_interrupt();
     if(!list_empty(&(cur_coroutine->list_node))){
         list_del(&(cur_coroutine->list_node));
     }
     memset(&(cur_coroutine->resume_time), 0, sizeof(cur_coroutine->resume_time));
     cur_coroutine = jump_fcontext(&(cur_coroutine->stack_pointer), main_coroutine.stack_pointer, &main_coroutine, 1);
-
-    sigprocmask(SIG_UNBLOCK, &sigset, NULL);
+    enable_preempt_interrupt();
 }
 
 static inline void reader_writer_callback(struct event_loop *ev, int fd, int event_type, void *coroutine){
@@ -277,26 +275,14 @@ int enter_coroutine_environment(void (*co_start)(void *), void *arg){
         INIT_HLIST_HEAD(&waiting_coroutine_hash[i]);
     }
 
-    sigset_t sigset;
-    sigemptyset(&sigset);
-    sigaddset(&sigset, PREEMPT_RESUME_SIGNO);
-    sigaddset(&sigset, SIGPROF);
-    sigprocmask(SIG_BLOCK, &sigset, NULL);
-
     struct sigaction sa;
-    memset(&sa, 0, sizeof(struct sigaction));
-    sa.sa_sigaction = preempt_check;
-    sigemptyset(&sa.sa_mask);
-    sigaddset(&sa.sa_mask, PREEMPT_RESUME_SIGNO);
-    sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    sigaction(SIGPROF, &sa, NULL);
-
     memset(&sa, 0, sizeof(struct sigaction));
     sa.sa_sigaction = preempt_resume;
     sigemptyset(&sa.sa_mask);
-    sigaddset(&sa.sa_mask, SIGPROF);
     sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    sigaction(PREEMPT_RESUME_SIGNO, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
+
+    disable_preempt_interrupt();
 
     struct itimerval itimerval;
     memset(&itimerval, 0, sizeof(struct itimerval));
