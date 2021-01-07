@@ -103,7 +103,8 @@ static inline void enable_preempt_interrupt(){
     sa.sa_sigaction = preempt_interrupt;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    sigaction(SIGPROF, &sa, NULL);
+    // disable preemptive coroutine temporarily
+    //sigaction(SIGPROF, &sa, NULL);
 }
 
 static inline void disable_preempt_interrupt(){
