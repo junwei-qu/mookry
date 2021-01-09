@@ -1,0 +1,8 @@
+#ifndef  _EXTEND_ERROR_H
+#define  _EXTEND_ERROR_H
+
+#define ECHANNELNAME -1000
+#define ECHANNELUNLINKED -1001
+
+#endif
+

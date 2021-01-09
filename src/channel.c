@@ -2,9 +2,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include "hlist.h"
 #include "list.h"
 #include "channel.h"
+#include "extend_errno.h"
 
 struct channel_pool *alloc_channel_pool();
 void free_channel_pool(struct channel_pool *channel_pool);
@@ -56,6 +58,9 @@ static inline uint32_t cal_name_hash(char *name, int len){
 
 struct channel_pool *alloc_channel_pool(){
     struct channel_pool *channel_pool = calloc(1, sizeof(struct channel_pool));
+    if(!channel_pool){
+        return NULL;
+    }
     channel_pool->open = channel_pool_open;
     channel_pool->close = channel_pool_close;
     channel_pool->unlink = channel_pool_unlink;
@@ -115,12 +120,14 @@ static int64_t channel_pool_open(struct channel_pool *channel_pool, char *name, 
     struct channel *channel, *find_channel = NULL;
     struct hlist_node *cur, *next;
     if(strlen(name) > CHANNEL_NAME_SIZE){
+        errno = ECHANNELNAME;
         return -1;
     }
     struct hlist_head *head = &(channel_pool->name_hash[cal_name_hash(name, strlen(name))]);
     hlist_for_each_entry_safe(channel, cur, next, head, name_node){
         if(strcmp(channel->name, name) == 0){
 	    if(channel->unlinked){
+	        errno = ECHANNELUNLINKED;
                 return -1;
 	    }
 	    find_channel = channel;
@@ -174,9 +181,6 @@ static void channel_pool_unlink(struct channel_pool *channel_pool, char *name){
     struct channel *channel, *find_channel = NULL;
     struct channel_data *cur_channel_data, *next_channel_data;
     struct hlist_node *cur, *next;
-    if(strlen(name) > CHANNEL_NAME_SIZE){
-        return;
-    }
     struct hlist_head *head = &(channel_pool->name_hash[cal_name_hash(name, strlen(name))]);
     hlist_for_each_entry_safe(channel, cur, next, head, name_node){
         if(strcmp(channel->name, name) == 0){
@@ -206,9 +210,11 @@ static ssize_t channel_pool_receive(struct channel_pool *channel_pool, int64_t c
         if(channel_id == id_name_node->id) {
             channel = id_name_node->channel;
 	    if(msg_len < channel->msgsize){
+	        errno = EMSGSIZE;
                 return -1;
 	    }
 	    if(!channel->curmsgs){
+	        errno = EAGAIN;
                 return -1;
 	    }
 	    channel_data = list_entry(channel->list_head.next, typeof(*channel_data), data_node);
@@ -234,9 +240,11 @@ static ssize_t channel_pool_send(struct channel_pool *channel_pool, int64_t chan
         if(channel_id == id_name_node->id) {
             channel = id_name_node->channel;
 	    if(msg_len > channel->msgsize){
+	        errno = EMSGSIZE;
                 return -1;
 	    }
 	    if(channel->curmsgs >= channel->maxmsg){
+	        errno = EAGAIN;
                 return -1;
 	    }
 	    mem_len = sizeof(struct channel_data) + msg_len;
@@ -295,12 +303,14 @@ static int channel_pool_getname(struct channel_pool *channel_pool, int64_t chann
         if(channel_id == id_name_node->id) {
             channel = id_name_node->channel;
 	    if(strlen(channel->name) + 1 > buf_len) {
+	        errno = ECHANNELNAME;
                 return -1;
 	    }
 	    strcpy(buf, channel->name);
 	    return 0;
 	}
     }
+    errno = EINVAL;
     return -1;
 }
 
@@ -316,5 +326,6 @@ static int channel_pool_getmsgsize(struct channel_pool *channel_pool, int64_t ch
 	    return channel->msgsize;
 	}
     }
+    errno = EINVAL;
     return -1;
 }

@@ -10,7 +10,10 @@ static void free_tree(struct balance_binary_heap_node *root);
 static void heap_heapify(struct balance_binary_heap *heap, struct balance_binary_heap_value *value);
 
 struct balance_binary_heap *alloc_heap(int (*cmp_key)(const void *, const void *)){
-    struct balance_binary_heap *heap = malloc(sizeof(struct balance_binary_heap));
+    struct balance_binary_heap *heap = calloc(1, sizeof(struct balance_binary_heap));
+    if(!heap){
+        return NULL;
+    }
     heap->root = NULL;
     heap->cmp_key = cmp_key;
     heap->insert_value = heap_insert_value;
@@ -18,6 +21,7 @@ struct balance_binary_heap *alloc_heap(int (*cmp_key)(const void *, const void *
     heap->pop_value = heap_pop_value;
     heap->peek_value = heap_peek_value;
     heap->heapify = heap_heapify;
+    return heap;
 }
 
 void free_heap(struct balance_binary_heap *heap){
@@ -39,8 +43,15 @@ static void free_tree(struct balance_binary_heap_node *root){
 }
 
 static struct balance_binary_heap_value* heap_insert_value(struct balance_binary_heap *heap, void *pointer) {
-    struct balance_binary_heap_node* node = malloc(sizeof(struct balance_binary_heap_node));
-    struct balance_binary_heap_value* value = malloc(sizeof(struct balance_binary_heap_value));
+    struct balance_binary_heap_node* node = calloc(1, sizeof(struct balance_binary_heap_node));
+    if(!node){
+        return NULL;
+    }
+    struct balance_binary_heap_value* value = calloc(1, sizeof(struct balance_binary_heap_value));
+    if(!value){
+        free(node);
+	return NULL;
+    }
     value->pointer = pointer;
     value->sign = BALANCE_BINARY_HEAP_SIGN;
     node->parent = node->left = node->right = NULL;

@@ -51,7 +51,8 @@ struct event_loop {
     void (*remove_reader_writer)(struct event_loop *ev, int fd);
     int (*add_signal)(struct event_loop *ev, int signo, void(*callback)(struct event_loop *ev, int signo, void *arg), void *arg);
     void (*remove_signal)(struct event_loop *ev, int signo);
-    uint64_t (*add_timer)(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, uint64_t timer_id, void *arg), void *arg); void (*remove_timer)(struct event_loop *ev, uint64_t timer_id);
+    int64_t (*add_timer)(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, int64_t timer_id, void *arg), void *arg); 
+    void (*remove_timer)(struct event_loop *ev, int64_t timer_id);
     int (*add_defer)(struct event_loop *ev, int(*callback)(struct event_loop *ev, void *arg), void *arg);
 };
 
@@ -60,8 +61,8 @@ struct event_loop_timer_node {
    struct balance_binary_heap_value *heap_value;
    struct timespec timespec;
    struct timespec timespec2;
-   uint64_t timer_id;
-   int (*callback)(struct event_loop *ev, uint64_t timer_id, void *arg);
+   int64_t timer_id;
+   int (*callback)(struct event_loop *ev, int64_t timer_id, void *arg);
    void *arg;
 };
 

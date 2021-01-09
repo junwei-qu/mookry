@@ -70,7 +70,7 @@ static inline void destroy_coroutine(struct coroutine *coroutine);
 static inline void resume_coroutine(struct coroutine *coroutine);
 static inline void yield_coroutine();
 static inline void reader_writer_callback(struct event_loop *ev, int fd, int event_type, void *coroutine);
-static inline int sleep_callback(struct event_loop *ev, uint64_t timer_id, void *coroutine);
+static inline int sleep_callback(struct event_loop *ev, int64_t timer_id, void *coroutine);
 static inline void signal_callback(struct event_loop *ev, int signo, void *arg);
 static inline void co_signal_callback(void *arg);
 static struct waiting_node *find_waiting_node(int64_t channel_id, int create);
@@ -98,13 +98,13 @@ void channel_close(int64_t channel_id);
 int64_t channel_open(char *name, int msgsize, int maxmsg);
 
 static inline void enable_preempt_interrupt(){
+    return;
     struct sigaction sa;
     memset(&sa, 0, sizeof(struct sigaction));
     sa.sa_sigaction = preempt_interrupt;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    // disable preemptive coroutine temporarily
-    //sigaction(SIGPROF, &sa, NULL);
+    sigaction(SIGPROF, &sa, NULL);
 }
 
 static inline void disable_preempt_interrupt(){
@@ -219,7 +219,7 @@ static inline void reader_writer_callback(struct event_loop *ev, int fd, int eve
     resume_coroutine(coroutine);
 }
 
-static inline int sleep_callback(struct event_loop *ev, uint64_t timer_id, void *coroutine){
+static inline int sleep_callback(struct event_loop *ev, int64_t timer_id, void *coroutine){
     resume_coroutine(coroutine);
     return 0;
 }
@@ -349,7 +349,8 @@ ssize_t co_write(int fd, const void *buf, size_t count){
     assert(main_event_loop);
     int ret;
     loop:
-    ret = main_event_loop->write(main_event_loop, fd, buf, count);
+    while((ret = main_event_loop->write(main_event_loop, fd, buf, count)) < 0 && errno == EINTR){
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_writer(main_event_loop, fd, reader_writer_callback, cur_coroutine);
 	yield_coroutine();
@@ -363,7 +364,8 @@ ssize_t co_read(int fd, void *buf, size_t count){
     assert(main_event_loop);
     int ret;
     loop:
-    ret = main_event_loop->read(main_event_loop, fd, buf, count);
+    while((ret = main_event_loop->read(main_event_loop, fd, buf, count)) < 0 && errno == EINTR){
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_reader(main_event_loop, fd, reader_writer_callback, cur_coroutine);
 	yield_coroutine();
@@ -377,7 +379,8 @@ int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen){
     assert(main_event_loop);
     int ret, optval;
     socklen_t optlen = sizeof(optval);
-    ret = connect(sockfd, addr, addrlen);
+    while((ret = connect(sockfd, addr, addrlen)) < 0 && errno == EINTR){
+    }
     if(ret == -1 && (errno == EAGAIN || errno == EINPROGRESS)){
 	main_event_loop->add_writer(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
 	yield_coroutine();
@@ -385,8 +388,8 @@ int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen){
 	optval = 0;
 	getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &optval, &optlen);
 	if(optval != 0){
-	    ret = -1;
             errno = optval;
+	    ret = -1;
 	} else {
             ret = 0;
 	}
@@ -398,7 +401,8 @@ int co_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen){
     assert(main_event_loop);
     int ret;
     loop:
-    ret = main_event_loop->accept(main_event_loop, sockfd, addr, addrlen);
+    while((ret = main_event_loop->accept(main_event_loop, sockfd, addr, addrlen)) < 0 && errno == EINTR){
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_reader(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
 	yield_coroutine();
@@ -412,7 +416,8 @@ int co_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
     assert(main_event_loop);
     int ret;
     loop:
-    ret = main_event_loop->accept4(main_event_loop, sockfd, addr, addrlen, flags);
+    while((ret = main_event_loop->accept4(main_event_loop, sockfd, addr, addrlen, flags)) < 0 && errno == EINTR){
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_reader(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
 	yield_coroutine();
@@ -452,12 +457,13 @@ void co_remove_signal(int signo){
 int64_t channel_open(char *name, int msgsize, int maxmsg){
     assert(main_channel_pool);
     int64_t channel_id = main_channel_pool->open(main_channel_pool, name, msgsize, maxmsg);
-    if(channel_id != -1){
-        struct channel_node *channel_node = calloc(1, sizeof(channel_node));       
-	channel_node->channel_id = channel_id;
-	struct hlist_head *head = &(cur_coroutine->channels[channel_id & (COROUTINE_CHANNEL_HASH_SIZE -1)]);
-	hlist_add_head(&(channel_node->node), head);
+    if(channel_id < 0){
+        return -1;
     }
+    struct channel_node *channel_node = calloc(1, sizeof(channel_node));       
+    channel_node->channel_id = channel_id;
+    struct hlist_head *head = &(cur_coroutine->channels[channel_id & (COROUTINE_CHANNEL_HASH_SIZE -1)]);
+    hlist_add_head(&(channel_node->node), head);
     return channel_id;
 }
 
@@ -493,6 +499,7 @@ int channel_receive(int64_t channel_id, char *msg_ptr, size_t msg_len, double ti
 	    }
 	    if(main_channel_pool->isempty(main_channel_pool, channel_id)){
 	        if(timeout == 0){
+		    errno = EAGAIN;
                     return -1;
 		}
 	        find_node = find_waiting_node(channel_id, 1);
@@ -536,6 +543,7 @@ int channel_receive(int64_t channel_id, char *msg_ptr, size_t msg_len, double ti
 	    return receive_ret;
         }
     }
+    errno = EINVAL;
     return -1;
 }
 
@@ -553,6 +561,7 @@ int channel_send(int64_t channel_id, const char *msg_ptr, size_t msg_len, double
 	    }
 	    if(main_channel_pool->isfull(main_channel_pool, channel_id)){
 	        if(timeout == 0){
+		    errno = EAGAIN;
                     return -1;
 		}
 	        find_node = find_waiting_node(channel_id, 1);
@@ -596,5 +605,6 @@ int channel_send(int64_t channel_id, const char *msg_ptr, size_t msg_len, double
 	    return send_ret;
         }
     }
+    errno = EINVAL;
     return -1;
 }

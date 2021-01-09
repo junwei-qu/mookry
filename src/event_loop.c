@@ -28,8 +28,8 @@ static int event_loop_add_reader_writer(struct event_loop *ev, int fd, void(*cal
 static void event_loop_remove_reader_writer(struct event_loop *ev, int fd);
 static int event_loop_add_signal(struct event_loop *ev, int signo, void(*callback)(struct event_loop *ev, int signo, void *arg), void *arg);
 static void event_loop_remove_signal(struct event_loop *ev, int signo);
-static uint64_t event_loop_add_timer(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, uint64_t timer_id, void *arg), void *arg);
-static void event_loop_remove_timer(struct event_loop *ev, uint64_t timer_id);
+static int64_t event_loop_add_timer(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, int64_t timer_id, void *arg), void *arg);
+static void event_loop_remove_timer(struct event_loop *ev, int64_t timer_id);
 static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct event_loop *ev, void *arg), void *arg);
 static int event_loop_add_event(struct event_loop *ev, int fd, int event_type, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
 static void event_loop_remove_event(struct event_loop *ev, int fd, int event_type);
@@ -51,7 +51,7 @@ static int event_loop_timer_node_cmp(const void *arg1, const void *arg2) {
 }
 
 static void event_loop_timerfd_callback(struct event_loop *ev, int fd, int event_type, void *arg){
-    uint64_t exp, timer_id; 
+    int64_t exp, timer_id; 
     struct itimerspec itimerspec;
     struct event_loop_timer_node *timer_node, tmp_node;
     struct hlist_node *cur, *next;
@@ -115,6 +115,14 @@ static void event_loop_signalfd_callback(struct event_loop *ev, int fd, int even
 struct event_loop *alloc_event_loop(){
     struct event_loop *ev; 
     ev = calloc(1, sizeof(struct event_loop));
+    if(!ev){
+        return NULL;
+    }
+    ev->timer_heap = alloc_heap(event_loop_timer_node_cmp);
+    if(!ev->timer_heap){
+        free(ev);
+        return NULL;
+    }
     ev->init = event_loop_init;
     ev->destruct = event_loop_destruct;
     ev->accept = event_loop_accept;
@@ -163,7 +171,6 @@ static void event_loop_init(struct event_loop *ev){
     ev->add_reader(ev, ev->signalfd, event_loop_signalfd_callback, NULL);
     ev->timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK|TFD_CLOEXEC);
     ev->add_reader(ev, ev->timerfd, event_loop_timerfd_callback, NULL);
-    ev->timer_heap = alloc_heap(event_loop_timer_node_cmp);
 }
 
 void free_event_loop(struct event_loop *ev){
@@ -246,7 +253,9 @@ static int event_loop_add_event(struct event_loop *ev, int fd, int event_type, v
 	}
     }
     fd_node = calloc(1, sizeof(struct event_loop_fd_node));
-    hlist_add_head(&(fd_node->hlist_node), head);
+    if(!fd_node){
+        return -1;
+    }
     fd_node->fd = fd;
     if(event_type & EVENT_LOOP_FD_READ){
         epoll_event.events |= EPOLLIN;
@@ -261,7 +270,12 @@ static int event_loop_add_event(struct event_loop *ev, int fd, int event_type, v
     epoll_event.events |= (EPOLLRDHUP | EPOLLET);
     epoll_event.data.fd = fd;
     fd_node->event_type = event_type;
-    epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
+    int ret = epoll_ctl(ev->epollfd, EPOLL_CTL_ADD, fd, &epoll_event);
+    if(ret < 0){
+        free(fd_node);
+        return -1;
+    }
+    hlist_add_head(&(fd_node->hlist_node), head);
     return 0;
 }
 
@@ -337,13 +351,15 @@ static void event_loop_remove_reader_writer(struct event_loop *ev, int fd){
     event_loop_remove_event(ev, fd, EVENT_LOOP_FD_READ | EVENT_LOOP_FD_WRITE);
 }
 
-static uint64_t event_loop_add_timer(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, uint64_t timer_id, void *arg), void *arg){
-    struct event_loop_timer_node *timer_node = calloc(1, sizeof(struct event_loop_timer_node));
+static int64_t event_loop_add_timer(struct event_loop *ev, struct timespec *timespec, int(*callback)(struct event_loop *ev, int64_t timer_id, void *arg), void *arg){
     struct timespec tmp_ts; 
-    struct event_loop_timer_node *value1, *value2;
+    struct event_loop_timer_node *value1, *value2, *timer_node;
     struct itimerspec itimerspec;
+    timer_node = calloc(1, sizeof(struct event_loop_timer_node));
+    if(!timer_node){
+        return -1;
+    }
     timer_node->timer_id = ev->source_id++;
-    hlist_add_head(&(timer_node->hlist_node), &(ev->timer_hash[EVENT_LOOP_TIMER_HASH(timer_node->timer_id)]));
     memcpy(&(timer_node->timespec), timespec, sizeof(struct timespec));
     memcpy(&(timer_node->timespec2), timespec, sizeof(struct timespec));
     clock_gettime(CLOCK_MONOTONIC, &tmp_ts);
@@ -357,16 +373,21 @@ static uint64_t event_loop_add_timer(struct event_loop *ev, struct timespec *tim
     timer_node->arg = arg;
     value1 = ev->timer_heap->peek_value(ev->timer_heap); 
     timer_node->heap_value = ev->timer_heap->insert_value(ev->timer_heap, timer_node);
+    if(!timer_node->heap_value){
+        free(timer_node);
+        return -1;
+    }
     value2 = ev->timer_heap->peek_value(ev->timer_heap); 
     if(value1 != value2){
         memset(&itimerspec, 0, sizeof(struct itimerspec));
 	memcpy(&(itimerspec.it_value), &(value2->timespec), sizeof(struct timespec));
         timerfd_settime(ev->timerfd, TFD_TIMER_ABSTIME, &itimerspec, NULL);
     }
+    hlist_add_head(&(timer_node->hlist_node), &(ev->timer_hash[EVENT_LOOP_TIMER_HASH(timer_node->timer_id)]));
     return timer_node->timer_id;
 }
 
-static void event_loop_remove_timer(struct event_loop *ev, uint64_t timer_id) {
+static void event_loop_remove_timer(struct event_loop *ev, int64_t timer_id) {
     struct event_loop_timer_node *timer_node;
     struct event_loop_timer_node *value1, *value2;
     struct itimerspec itimerspec;
@@ -402,6 +423,9 @@ static int event_loop_add_signal(struct event_loop *ev, int signo, void(*callbac
 	}
     }
     cur = calloc(1, sizeof(struct event_loop_signal_node));
+    if(!cur){
+        return -1;
+    }
     sigemptyset(&mask);
     sigprocmask(SIG_SETMASK, NULL, &mask);
     sigaddset(&mask, signo);
@@ -433,6 +457,9 @@ static void event_loop_remove_signal(struct event_loop *ev, int signo){
 
 static int event_loop_add_defer(struct event_loop *ev, int(*callback)(struct event_loop *ev, void *arg), void *arg){
     struct event_loop_defer_node *defer_node = calloc(1, sizeof(struct event_loop_defer_node));
+    if(!defer_node){
+        return -1;
+    }
     defer_node->callback = callback;
     defer_node->arg = arg;
     list_add_before(&(defer_node->list_node), &(ev->defer_head));
