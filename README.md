@@ -1,10 +1,11 @@
 # mookry
 # Requirements: linux os, x86-64, kernel version >= 2.6.17
 # Usage:
-### Create Coroutine:  void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
- stack_size: the stack size of coroutine when created<br/>
- routine: the routine will be run when coroutine start<br/>
- arg: arg will be passed to routine
+### void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
+  create coroutine<br/>
+  stack_size: the stack size of coroutine when created<br/>
+  routine: the routine will be run when coroutine start<br/>
+  arg: arg will be passed to routine
  
 ### ssize_t co_write(int fd, const void *buf, size_t count);
   requirement: fd must be nonblock<br/>
