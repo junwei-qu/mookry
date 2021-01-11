@@ -50,7 +50,8 @@ struct id_name_node {
 
 static inline uint32_t cal_name_hash(char *name, int len){
     uint32_t ret = 0;
-    for(int i = 0; i < len; i++){
+    int i;
+    for(i = 0; i < len; i++){
        ret += (unsigned char)name[i];
     }
     return ret & (CHANNEL_NAME_HASH_SIZE - 1);

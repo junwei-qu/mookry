@@ -235,7 +235,8 @@ static inline void signal_callback(struct event_loop *ev, int singo, void *arg){
 
 static inline uint32_t channel_name_hash(char *name, int len){
     uint32_t ret = 0;
-    for(int i = 0; i < len; i++){
+    int i;
+    for(i = 0; i < len; i++){
        ret += (unsigned char)name[i];
     }
     return ret & (WAITING_COROUTINE_HASH_SIZE - 1);
