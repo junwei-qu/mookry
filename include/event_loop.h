@@ -41,7 +41,13 @@ struct event_loop {
     int (*accept)(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
     int (*accept4)(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
     ssize_t (*read)(struct event_loop *ev, int fd, void *buf, size_t count);
+    ssize_t (*recv)(struct event_loop *ev, int sockfd, void *buf, size_t len, int flags);
+    ssize_t (*recvfrom)(struct event_loop *ev, int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
+    ssize_t (*recvmsg)(struct event_loop *ev, int sockfd, struct msghdr *msg, int flags);
     ssize_t (*write)(struct event_loop *ev, int fd, const void *buf, size_t count);
+    ssize_t (*send)(struct event_loop *ev, int sockfd, const void *buf, size_t len, int flags);
+    ssize_t (*sendto)(struct event_loop *ev, int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen);
+    ssize_t (*sendmsg)(struct event_loop *ev, int sockfd, const struct msghdr *msg, int flags);
     int (*poll)(struct event_loop *ev, int timeout);
     int (*add_reader)(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
     void (*remove_reader)(struct event_loop *ev, int fd);

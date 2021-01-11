@@ -17,7 +17,13 @@ static void event_loop_destruct(struct event_loop *ev);
 static int event_loop_accept(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 static int event_loop_accept4(struct event_loop *ev, int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
 static ssize_t event_loop_read(struct event_loop *ev, int fd, void *buf, size_t count);
+static ssize_t event_loop_recv(struct event_loop *ev, int sockfd, void *buf, size_t len, int flags);
+static ssize_t event_loop_recvfrom(struct event_loop *ev, int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
+static ssize_t event_loop_recvmsg(struct event_loop *ev, int sockfd, struct msghdr *msg, int flags);
 static ssize_t event_loop_write(struct event_loop *ev, int fd, const void *buf, size_t count);
+static ssize_t event_loop_send(struct event_loop *ev, int sockfd, const void *buf, size_t len, int flags);
+static ssize_t event_loop_sendto(struct event_loop *ev, int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen);
+static ssize_t event_loop_sendmsg(struct event_loop *ev, int sockfd, const struct msghdr *msg, int flags);
 static int event_loop_poll(struct event_loop *ev, int timeout);
 static int event_loop_epoll_wait(struct event_loop *ev, int timeout);
 static int event_loop_add_reader(struct event_loop *ev, int fd, void(*callback)(struct event_loop *ev, int fd, int event_type, void *arg), void *arg);
@@ -128,7 +134,13 @@ struct event_loop *alloc_event_loop(){
     ev->accept = event_loop_accept;
     ev->accept4 = event_loop_accept4;
     ev->read = event_loop_read;
+    ev->recv = event_loop_recv;
+    ev->recvfrom = event_loop_recvfrom;
+    ev->recvmsg = event_loop_recvmsg;
     ev->write = event_loop_write;
+    ev->send = event_loop_send;
+    ev->sendto = event_loop_sendto;
+    ev->sendmsg = event_loop_sendmsg;
     ev->poll = event_loop_poll;
     ev->add_reader = event_loop_add_reader;
     ev->remove_reader = event_loop_remove_reader;
@@ -673,6 +685,72 @@ static ssize_t event_loop_read(struct event_loop *ev, int fd, void *buf, size_t 
     return ret;
 }
 
+static ssize_t event_loop_recv(struct event_loop *ev, int sockfd, void *buf, size_t len, int flags){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = recv(sockfd, buf, len, flags);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_READ);
+		if(!fd_node->ready_event_type){
+		    fd_node->last_ready_flag = 0;
+                    hlist_del(&(fd_node->hlist_ready_node));
+                    list_del(&(fd_node->list_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static ssize_t event_loop_recvfrom(struct event_loop *ev, int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_READ);
+		if(!fd_node->ready_event_type){
+		    fd_node->last_ready_flag = 0;
+                    hlist_del(&(fd_node->hlist_ready_node));
+                    list_del(&(fd_node->list_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static ssize_t event_loop_recvmsg(struct event_loop *ev, int sockfd, struct msghdr *msg, int flags){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = recvmsg(sockfd, msg, flags);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_READ);
+		if(!fd_node->ready_event_type){
+		    fd_node->last_ready_flag = 0;
+                    hlist_del(&(fd_node->hlist_ready_node));
+                    list_del(&(fd_node->list_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
 static ssize_t event_loop_write(struct event_loop *ev, int fd, const void *buf, size_t count){
     struct event_loop_fd_node *fd_node;
     struct hlist_node *cur, *next;
@@ -682,6 +760,72 @@ static ssize_t event_loop_write(struct event_loop *ev, int fd, const void *buf, 
         head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(fd)];
         hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
 	    if(fd_node->fd == fd){
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_WRITE);
+		if(!fd_node->ready_event_type){
+		    fd_node->last_ready_flag = 0;
+                    hlist_del(&(fd_node->hlist_ready_node));
+                    list_del(&(fd_node->list_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static ssize_t event_loop_send(struct event_loop *ev, int sockfd, const void *buf, size_t len, int flags){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = send(sockfd, buf, len, flags);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_WRITE);
+		if(!fd_node->ready_event_type){
+		    fd_node->last_ready_flag = 0;
+                    hlist_del(&(fd_node->hlist_ready_node));
+                    list_del(&(fd_node->list_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static ssize_t event_loop_sendto(struct event_loop *ev, int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = sendto(sockfd, buf, len, flags, dest_addr, addrlen);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
+                fd_node->ready_event_type &= (~EVENT_LOOP_FD_WRITE);
+		if(!fd_node->ready_event_type){
+		    fd_node->last_ready_flag = 0;
+                    hlist_del(&(fd_node->hlist_ready_node));
+                    list_del(&(fd_node->list_ready_node));
+		}
+                break;
+	    }
+	}
+    }
+    return ret;
+}
+
+static ssize_t event_loop_sendmsg(struct event_loop *ev, int sockfd, const struct msghdr *msg, int flags){
+    struct event_loop_fd_node *fd_node;
+    struct hlist_node *cur, *next;
+    struct hlist_head *head; 
+    int ret = sendmsg(sockfd, msg, flags);
+    if(ret == -1 && errno == EAGAIN){
+        head = &ev->ready_fd_hash[EVENT_LOOP_READY_FD_HASH(sockfd)];
+        hlist_for_each_entry_safe(fd_node, cur, next, head, hlist_ready_node){
+	    if(fd_node->fd == sockfd){
                 fd_node->ready_event_type &= (~EVENT_LOOP_FD_WRITE);
 		if(!fd_node->ready_event_type){
 		    fd_node->last_ready_flag = 0;
