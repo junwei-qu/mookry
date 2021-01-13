@@ -2,14 +2,14 @@ INCLUDE_PATH=-Iinclude
 CC=gcc
 FLAGS=-fPIC
 
-all: src/event_loop.o common/balance_binary_heap.o src/channel.o src/coroutine.o src/boost/make_fcontext.o src/boost/jump_fcontext.o
-	$(CC) -shared $(FLAGS) -Wl,-soname,libmookry.so -o mookry.so src/channel.o src/event_loop.o common/balance_binary_heap.o src/coroutine.o src/boost/make_fcontext.o src/boost/jump_fcontext.o
+all: src/core/event_loop.o src/core/balance_binary_heap.o src/core/channel.o src/core/coroutine.o src/boost/make_fcontext.o src/boost/jump_fcontext.o
+	$(CC) -shared $(FLAGS) -Wl,-soname,libmookry.so -o mookry.so src/core/channel.o src/core/event_loop.o src/core/balance_binary_heap.o src/core/coroutine.o src/boost/make_fcontext.o src/boost/jump_fcontext.o
 
-src/channel.o: src/channel.c include/channel.h
-	$(CC) $(FLAGS) -o src/channel.o -c src/channel.c $(INCLUDE_PATH)
+src/core/channel.o: src/core/channel.c include/channel.h
+	$(CC) $(FLAGS) -o src/core/channel.o -c src/core/channel.c $(INCLUDE_PATH)
 
-src/coroutine.o: src/coroutine.c include/coroutine.h
-	$(CC) $(FLAGS) -o src/coroutine.o -c src/coroutine.c $(INCLUDE_PATH)
+src/core/coroutine.o: src/core/coroutine.c include/coroutine.h
+	$(CC) $(FLAGS) -o src/core/coroutine.o -c src/core/coroutine.c $(INCLUDE_PATH)
 
 src/boost/make_fcontext.o: src/boost/make_x86_64_sysv_elf_gas.S
 	$(CC) $(FLAGS) -o src/boost/make_fcontext.o -c src/boost/make_x86_64_sysv_elf_gas.S
@@ -17,11 +17,11 @@ src/boost/make_fcontext.o: src/boost/make_x86_64_sysv_elf_gas.S
 src/boost/jump_fcontext.o: src/boost/jump_x86_64_sysv_elf_gas.S
 	$(CC) $(FLAGS) -o src/boost/jump_fcontext.o -c src/boost/jump_x86_64_sysv_elf_gas.S
 
-src/event_loop.o: src/event_loop.c include/event_loop.h
-	$(CC) $(FLAGS) -o src/event_loop.o -c src/event_loop.c $(INCLUDE_PATH)
+src/core/event_loop.o: src/core/event_loop.c include/event_loop.h
+	$(CC) $(FLAGS) -o src/core/event_loop.o -c src/core/event_loop.c $(INCLUDE_PATH)
 
-common/balance_binary_heap.o: common/balance_binary_heap.c include/balance_binary_heap.h 
-	$(CC) $(FLAGS) -o common/balance_binary_heap.o -c common/balance_binary_heap.c $(INCLUDE_PATH)
+src/core/balance_binary_heap.o: src/core/balance_binary_heap.c include/balance_binary_heap.h 
+	$(CC) $(FLAGS) -o src/core/balance_binary_heap.o -c src/core/balance_binary_heap.c $(INCLUDE_PATH)
 install:
 	if [[ ! -e /usr/include/mookry ]];then \
 	    mkdir /usr/include/mookry; \
