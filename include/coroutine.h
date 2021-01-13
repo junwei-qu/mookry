@@ -9,14 +9,14 @@
 
 int enter_coroutine_environment(void (*co_start)(void *), void *arg);
 void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
-ssize_t co_write(int fd, const void *buf, size_t count);
-ssize_t co_send(int sockfd, const void *buf, size_t len, int flags);
-ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen);
-ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags);
-ssize_t co_read(int fd, void *buf, size_t count);
-ssize_t co_recv(int sockfd, void *buf, size_t len, int flags);
-ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
-ssize_t co_recvmsg(int sockfd, struct msghdr *msg, int flags);
+ssize_t co_write(int fd, const void *buf, size_t count, double timeout);
+ssize_t co_send(int sockfd, const void *buf, size_t len, int flags, double timeout);
+ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, double timeout);
+ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags, double timeout);
+ssize_t co_read(int fd, void *buf, size_t count, double timeout);
+ssize_t co_recv(int sockfd, void *buf, size_t len, int flags, double timeout);
+ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, double timeout);
+ssize_t co_recvmsg(int sockfd, struct msghdr *msg, int flags, double timeout);
 int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int co_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 int co_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);

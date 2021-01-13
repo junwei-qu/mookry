@@ -10,9 +10,9 @@ void reader_writer(void *arg){
     char buf[20];
     int n;
     while(1){
-        n = co_read(fd, buf, sizeof(buf));
+        n = co_read(fd, buf, sizeof(buf), 5);
 	if(n > 0){
-            co_write(fd, buf, n);
+            co_write(fd, buf, n, -1);
 	} else if(n <= 0){
 	    close(fd);
 	    return;

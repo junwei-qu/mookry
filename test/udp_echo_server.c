@@ -23,9 +23,9 @@ void co_start(void *arg){
     bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
     co_add_signal(SIGPIPE, sig_pipe, NULL);
     while(1){
-        long ret = co_recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&servaddr, &socklen);
+        long ret = co_recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&servaddr, &socklen, -1);
 	if(ret > 0){
-	    co_sendto(sockfd, buf, ret, 0, (struct sockaddr *)&servaddr, socklen);
+	    co_sendto(sockfd, buf, ret, 0, (struct sockaddr *)&servaddr, socklen, -1);
 	} else {
             perror("co_sendto error");
 	}

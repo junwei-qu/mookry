@@ -83,14 +83,14 @@ static inline void disable_preempt_interrupt();
 
 int enter_coroutine_environment(void (*co_start)(void *), void *arg);
 void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
-ssize_t co_write(int fd, const void *buf, size_t count);
-ssize_t co_send(int sockfd, const void *buf, size_t len, int flags);
-ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen);
-ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags);
-ssize_t co_read(int fd, void *buf, size_t count);
-ssize_t co_recv(int sockfd, void *buf, size_t len, int flags);
-ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
-ssize_t co_recvmsg(int sockfd, struct msghdr *msg, int flags);
+ssize_t co_write(int fd, const void *buf, size_t count, double timeout);
+ssize_t co_send(int sockfd, const void *buf, size_t len, int flags, double timeout);
+ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, double timeout);
+ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags, double timeout);
+ssize_t co_read(int fd, void *buf, size_t count, double timeout);
+ssize_t co_recv(int sockfd, void *buf, size_t len, int flags, double timeout);
+ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, double timeout);
+ssize_t co_recvmsg(int sockfd, struct msghdr *msg, int flags, double timeout);
 int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int co_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 int co_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
@@ -352,120 +352,280 @@ void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg){
     resume_coroutine(coroutine);
 }
 
-ssize_t co_write(int fd, const void *buf, size_t count){
+ssize_t co_write(int fd, const void *buf, size_t count, double timeout){
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->write(main_event_loop, fd, buf, count)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_writer(main_event_loop, fd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_writer(main_event_loop, fd);
 	goto loop;
     }
     return ret;
 }
 
-ssize_t co_send(int sockfd, const void *buf, size_t len, int flags) {
+ssize_t co_send(int sockfd, const void *buf, size_t len, int flags, double timeout) {
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->send(main_event_loop, sockfd, buf, len, flags)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_writer(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_writer(main_event_loop, sockfd);
 	goto loop;
     }
     return ret;
 }
 
-ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen){
+ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, double timeout){
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->sendto(main_event_loop, sockfd, buf, len, flags, dest_addr, addrlen)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_writer(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_writer(main_event_loop, sockfd);
 	goto loop;
     }
     return ret;
 }
 
-ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags){
+ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags, double timeout){
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->sendmsg(main_event_loop, sockfd, msg, flags)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_writer(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_writer(main_event_loop, sockfd);
 	goto loop;
     }
     return ret;
 }
 
-ssize_t co_read(int fd, void *buf, size_t count){
+ssize_t co_read(int fd, void *buf, size_t count, double timeout){
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->read(main_event_loop, fd, buf, count)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_reader(main_event_loop, fd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_reader(main_event_loop, fd);
 	goto loop;
     }
     return ret;
 }
 
-ssize_t co_recv(int sockfd, void *buf, size_t len, int flags){
+ssize_t co_recv(int sockfd, void *buf, size_t len, int flags, double timeout){
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->recv(main_event_loop, sockfd, buf, len, flags)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_reader(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_reader(main_event_loop, sockfd);
 	goto loop;
     }
     return ret;
 }
 
-ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen){
+ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, double timeout){
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->recvfrom(main_event_loop, sockfd, buf, len, flags, src_addr, addrlen)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_reader(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_reader(main_event_loop, sockfd);
 	goto loop;
     }
     return ret;
 }
 
-ssize_t co_recvmsg(int sockfd, struct msghdr *msg, int flags){
+ssize_t co_recvmsg(int sockfd, struct msghdr *msg, int flags, double timeout){
     assert(main_event_loop);
-    int ret;
+    int ret, timeout_ret = 0;
     loop:
     while((ret = main_event_loop->recvmsg(main_event_loop, sockfd, msg, flags)) < 0 && errno == EINTR){
     }
+    if(ret >= 0 || timeout == 0){
+        return ret;
+    }
+    if(timeout_ret == 1){
+        errno = 0;
+        return 0;
+    }
     if(ret == -1 && errno == EAGAIN){
 	main_event_loop->add_reader(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
-	yield_coroutine();
+        int64_t timer_id = 0;
+	if(timeout > 0) {
+            int integer_seconds = (int)(timeout);
+            long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
+            struct timespec ts;
+            ts.tv_sec = integer_seconds;
+            ts.tv_nsec = nano_seconds;
+            timer_id = main_event_loop->add_timer(main_event_loop, &ts, sleep_callback, cur_coroutine);
+	}
+        yield_coroutine();
+	if(timer_id > 0){
+            main_event_loop->remove_timer(main_event_loop, timer_id);
+	    timeout_ret = 1;
+	}
 	main_event_loop->remove_reader(main_event_loop, sockfd);
 	goto loop;
     }
@@ -665,7 +825,7 @@ int channel_send(int64_t channel_id, const char *msg_ptr, size_t msg_len, double
                 struct receive_send_list_node send_list_node;
 		send_list_node.coroutine = cur_coroutine;
 		list_add_before(&(send_list_node.node), &(find_node->send_list));
-		uint64_t timer_id = 0;
+		int64_t timer_id = 0;
 		if(timeout > 0) {
                     int integer_seconds = (int)(timeout);
                     long nano_seconds = (long)((timeout - integer_seconds)* 1000000000);
