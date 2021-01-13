@@ -1,11 +1,16 @@
-# mookry
+# The purpose of mookry is to make high performance programming for network become easy， look forward to your contribution to the project!
 # Requirements: linux os, x86-64, kernel version >= 2.6.17
-# Usage:
+# Install
+  make<br/>
+  make install
+# Uninstall
+  make uninstall
+# API:
 ### void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
-  create coroutine<br/>
+  Create Coroutine<br/>
   stack_size: the stack size of coroutine when created<br/>
   routine: the routine will be run when coroutine start<br/>
-  arg: arg will be passed to routine
+  arg: arg will be passed to the routine
  
 ### ssize_t co_write(int fd, const void *buf, size_t count);
   requirement: fd must be nonblock<br/>
@@ -83,7 +88,7 @@ main(int argc, char **argv){
     return 0;
 }
 ```
-#### echo server
+#### tcp echo server
 ```
 #include <mookry/coroutine.h>
 #include <arpa/inet.h>
