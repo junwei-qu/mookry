@@ -12,12 +12,12 @@
   routine: the routine will be run when coroutine start<br/>
   arg: arg will be passed to the routine
  
-### ssize_t co_write(int fd, const void *buf, size_t count);
+### ssize_t co_write(int fd, const void *buf, size_t count, double  timeout);
   requirement: fd must be nonblock<br/>
-  used in coroutine environment, current coroutine will be yielded automaticly when writing not available and resumed when writing available. Please refer to the write syscall for its synopsis
-###  ssize_t co_read(int fd, void *buf, size_t count);
+  used in coroutine environment, current coroutine will be yielded automaticly when writing not available and resumed when writing available or timeout. Please refer to the write syscall for its synopsis
+###  ssize_t co_read(int fd, void *buf, size_t count, double timeout);
   requirement: fd must be nonblock<br/>
-  used in coroutine environment, current coroutine will be yielded automaticly when reading not available and resumed when reading available. Please refer to the read syscall for its synopsis
+  used in coroutine environment, current coroutine will be yielded automaticly when reading not available and resumed when reading available or timeout. Please refer to the read syscall for its synopsis
 ###  int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
   requirement: sockfd must be nonblock<br/>
   used in coroutine environment, current coroutine will be yielded automaticly when connecting can't be finished immediately and resumed when connecting finished. Please refer to the connect syscall for its synopsis
@@ -102,9 +102,9 @@ void reader_writer(void *arg){
     char buf[20];
     int n;
     while(1){
-        n = co_read(fd, buf, sizeof(buf));
+        n = co_read(fd, buf, sizeof(buf), 5);
         if(n > 0){
-            co_write(fd, buf, n);
+            co_write(fd, buf, n, -1);
         } else if(n <= 0){
             close(fd);
             return;
