@@ -54,12 +54,12 @@ main(int argc, char **argv){
 ```
 ## 6. ssize_t co_write(int sockfd, const void *buf, size_t count, double timeout);
 - DESCRIPTION  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_write()** writes up to **count** bytes from the buffer starting at **buf** to the file referred to by the file descriptor **sockfd**. The number of bytes written may be less than **count** if, for example, there is insufficient space on the underlying physical medium, or the RLIMIT_FSIZE resource limit is  encountered, or the call was interrupted by a signal handler after having written less than **count**  bytes. If the **timeout** is 0, **co_write** returns immediately when there is insufficient space on the underlying physical medium. If **timeout** is less than 0, **co_write** will be yielded automatically when writing not available and resumed when writing available. If **timeout** is greater than 0, it will return 0 when writing not available after **timeout** seconds.<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_write()** writes up to **count** bytes from the buffer starting at **buf** to the file referred to by the file descriptor **sockfd**. The number of bytes written may be less than **count** if, for example, there is insufficient space on the underlying physical medium, or the RLIMIT_FSIZE resource limit is  encountered, or the call was interrupted by a signal handler after having written less than **count**  bytes. If **timeout** is 0, **co_write()** returns immediately when there is insufficient space on the underlying physical medium. If **timeout** is less than 0, **co_write()** will be yielded automatically when writing not available and resumed when writing available. If **timeout** is greater than 0, it will return 0 when writing not available after **timeout** seconds.<br/>
 - RETURN VALUE  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, the number of bytes written is returned. On error, -1 is returned and errno is set to indicate the cause of the error. On timeout, 0 is returned.
 ## 7. ssize_t co_read(int fd, void *buf, size_t count, double timeout);
 - DESCRIPTION  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_read()** attempts to read up to **count** bytes from file descriptor **sockfd** into the buffer starting at **buf**. If the **timeout** is 0, **co_read** returns immediately when reading not available. If **timeout** is less than 0, **co_read** will be yielded automatically when reading not available and resumed when reading available. If **timeout** is greater than 0, it will return 0 when writing not available after **timeout** seconds.<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_read()** attempts to read up to **count** bytes from file descriptor **sockfd** into the buffer starting at **buf**. If **timeout** is 0, **co_read()** returns immediately when reading not available. If **timeout** is less than 0, **co_read()** will be yielded automatically when reading not available and resumed when reading available. If **timeout** is greater than 0, it will return 0 when writing not available after **timeout** seconds.<br/>
 - RETURN VALUE  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, the number of bytes read is returned. On error, -1 is returned and errno is set to indicate the cause of the error. On timeout, 0 is returned.
 ## 8. int co_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
@@ -225,3 +225,55 @@ main(int argc, char **argv){
 ## 18. void channel_close(int64_t channel_id);
 - DESCRIPTION  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Close the channel referred by channel_id in the current coroutine. The channel_close will be invoked automatically when the current coroutine exits.
+## 19. ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, double timeout);
+- DESCRIPTION  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_recvfrom()** is used to receive messages from a socket. It may be used to receive data on both connectionless and connection-oriented sockets. If **timeout** is 0, **co_recvfrom()** returns immediately when receiving not available. If **timeout** is less than 0, **co_recvfrom()** will be yielded automatically when receiving not available and resumed when receiving available. If **timeout** is greater than 0, it will return 0 when receiving not available after **timeout** seconds.<br/>
+- RETURN VALUE  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, the number of bytes received is returned. On error, -1 is returned and errno is set to indicate the cause of the error. On timeout, 0 is returned.
+## 20. ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, double timeout);
+- DESCRIPTION  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_sendto()** attempts to send messages to a socket. If **timeout** is 0, **co_sendto()** returns immediately when sending not available. If **timeout** is less than 0, **co_sendto()** will be yielded automatically when sending not available and resumed when sending available. If **timeout** is greater than 0, it will return 0 when sending not available after **timeout** seconds.<br/>
+- RETURN VALUE  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, the number of bytes send is returned. On error, -1 is returned and errno is set to indicate the cause of the error. On timeout, 0 is returned.
+- EXAMPLES
+```
+#include <mookry/coroutine.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <signal.h>
+#include <stdio.h>
+#include <fcntl.h>
+
+void sig_pipe(int signo, void *arg){
+    printf("sig_pipe\n");
+}
+
+void co_start(void *arg){
+    struct sockaddr_in servaddr;
+    socklen_t socklen = sizeof(servaddr);
+    int sockfd;
+    char buf[65535];
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_port = htons(1234);
+    bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    co_add_signal(SIGPIPE, sig_pipe, NULL);
+    while(1){
+        long ret = co_recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&servaddr, &socklen, -1);
+        if(ret > 0){
+            co_sendto(sockfd, buf, ret, 0, (struct sockaddr *)&servaddr, socklen, -1);
+        } else {
+            perror("co_sendto error");
+        }
+    }
+}
+
+int
+main(int argc, char **argv){
+    enter_coroutine_environment(co_start, NULL);
+    return 0;
+}
+```
