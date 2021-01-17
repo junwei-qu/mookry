@@ -82,12 +82,12 @@ static inline void enable_preempt_interrupt();
 static inline void disable_preempt_interrupt();
 
 int enter_coroutine_environment(void (*co_start)(void *), void *arg);
-void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
-ssize_t co_write(int fd, const void *buf, size_t count, double timeout);
+int make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
+ssize_t co_write(int sockfd, const void *buf, size_t count, double timeout);
 ssize_t co_send(int sockfd, const void *buf, size_t len, int flags, double timeout);
 ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, double timeout);
 ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags, double timeout);
-ssize_t co_read(int fd, void *buf, size_t count, double timeout);
+ssize_t co_read(int sockfd, void *buf, size_t count, double timeout);
 ssize_t co_recv(int sockfd, void *buf, size_t len, int flags, double timeout);
 ssize_t co_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, double timeout);
 ssize_t co_recvmsg(int sockfd, struct msghdr *msg, int flags, double timeout);
@@ -325,7 +325,7 @@ int enter_coroutine_environment(void (*co_start)(void *), void *arg){
     return ret;
 }
 
-void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg){
+int make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg){
     int page_size = sysconf(_SC_PAGE_SIZE);
     if(!stack_size){
         stack_size = DEFAULT_COROUTINE_STACK_SIZE;
@@ -338,6 +338,9 @@ void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg){
 	map_size -= (map_size & (page_size - 1));
     }
     void *mem_base = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1 ,0);
+    if(!mem_base){
+        return -1;
+    }
     mprotect(mem_base, page_size, PROT_NONE);
     struct coroutine *coroutine = (struct coroutine *)((char *)mem_base + map_size - sizeof(struct coroutine));
     memset(coroutine, 0, sizeof(struct coroutine));
@@ -350,13 +353,14 @@ void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg){
     coroutine->stack_pointer = make_fcontext((char *)coroutine - 1, stack_size, routine_start);
     coroutine_count += 1;
     resume_coroutine(coroutine);
+    return 0;
 }
 
-ssize_t co_write(int fd, const void *buf, size_t count, double timeout){
+ssize_t co_write(int sockfd, const void *buf, size_t count, double timeout){
     assert(main_event_loop);
     int ret, timeout_ret = 0;
     loop:
-    while((ret = main_event_loop->write(main_event_loop, fd, buf, count)) < 0 && errno == EINTR){
+    while((ret = main_event_loop->write(main_event_loop, sockfd, buf, count)) < 0 && errno == EINTR){
     }
     if(ret >= 0 || timeout == 0){
         return ret;
@@ -366,7 +370,7 @@ ssize_t co_write(int fd, const void *buf, size_t count, double timeout){
         return 0;
     }
     if(ret == -1 && errno == EAGAIN){
-	main_event_loop->add_writer(main_event_loop, fd, reader_writer_callback, cur_coroutine);
+	main_event_loop->add_writer(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
         int64_t timer_id = 0;
 	if(timeout > 0) {
             int integer_seconds = (int)(timeout);
@@ -381,7 +385,7 @@ ssize_t co_write(int fd, const void *buf, size_t count, double timeout){
             main_event_loop->remove_timer(main_event_loop, timer_id);
 	    timeout_ret = 1;
 	}
-	main_event_loop->remove_writer(main_event_loop, fd);
+	main_event_loop->remove_writer(main_event_loop, sockfd);
 	goto loop;
     }
     return ret;
@@ -492,11 +496,11 @@ ssize_t co_sendmsg(int sockfd, const struct msghdr *msg, int flags, double timeo
     return ret;
 }
 
-ssize_t co_read(int fd, void *buf, size_t count, double timeout){
+ssize_t co_read(int sockfd, void *buf, size_t count, double timeout){
     assert(main_event_loop);
     int ret, timeout_ret = 0;
     loop:
-    while((ret = main_event_loop->read(main_event_loop, fd, buf, count)) < 0 && errno == EINTR){
+    while((ret = main_event_loop->read(main_event_loop, sockfd, buf, count)) < 0 && errno == EINTR){
     }
     if(ret >= 0 || timeout == 0){
         return ret;
@@ -506,7 +510,7 @@ ssize_t co_read(int fd, void *buf, size_t count, double timeout){
         return 0;
     }
     if(ret == -1 && errno == EAGAIN){
-	main_event_loop->add_reader(main_event_loop, fd, reader_writer_callback, cur_coroutine);
+	main_event_loop->add_reader(main_event_loop, sockfd, reader_writer_callback, cur_coroutine);
         int64_t timer_id = 0;
 	if(timeout > 0) {
             int integer_seconds = (int)(timeout);
@@ -521,7 +525,7 @@ ssize_t co_read(int fd, void *buf, size_t count, double timeout){
             main_event_loop->remove_timer(main_event_loop, timer_id);
 	    timeout_ret = 1;
 	}
-	main_event_loop->remove_reader(main_event_loop, fd);
+	main_event_loop->remove_reader(main_event_loop, sockfd);
 	goto loop;
     }
     return ret;

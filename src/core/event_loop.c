@@ -563,7 +563,8 @@ static int event_loop_epoll_wait(struct event_loop *ev, int timeout){
     struct event_loop_fd_node *fd_node;
     struct hlist_node *cur, *next;
     struct hlist_head *head; 
-    nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout);
+    while((nfds = epoll_wait(ev->epollfd, ev->events, EVENT_LOOP_MAX_EVENTS, timeout)) < 0 && errno == EINTR){
+    }
     if(nfds <= 0){
         return nfds;
     }

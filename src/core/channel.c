@@ -163,6 +163,7 @@ static void channel_pool_close(struct channel_pool *channel_pool, int64_t channe
     head = &channel_pool->id_hash[channel_id & (CHANNEL_ID_HASH_SIZE - 1)];
     hlist_for_each_entry_safe(id_name_node, cur, next, head, id_node){
         if(channel_id == id_name_node->id) {
+	    hlist_del(&(id_name_node->id_node));
             channel = id_name_node->channel;
 	    free(id_name_node);
             channel->refcnt--;
