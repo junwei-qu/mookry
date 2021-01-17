@@ -190,6 +190,35 @@ main(int argc, char **argv){
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Receive a message from the channel referred by channel_id which is returned by channel_open. The message will be placed in the buffer which starts at **msg_ptr**. The **msg_len** must be greater than or equal to the **msgsize** which specifies the max length  of message to be send when the channel is created. The **timeout** specifies the max seconds to wait when the channel is empty.<br/>
 - RETURN VALUE  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, the number of bytes received is returned.  On error, -1 is returned, and errno is set to indicate the cause of the error. On timeout, 0 is returned.
+- EXAMPLES
+```
+#include <stdio.h>
+#include <mookry/coroutine.h>
+
+void routine1(void *arg){
+    char buf[100];
+    int64_t channel_id = channel_open("/test-channel", 100, 100);
+    int ret = channel_send(channel_id, "hello", 6, -1);
+}
+
+void routine2(void *arg){
+    char buf[100];
+    int64_t channel_id = channel_open("/test-channel", 100, 100);
+    int ret = channel_receive(channel_id, buf, sizeof(buf), -1);
+    printf("receive data: %s\n", buf);
+}
+
+void co_start(void *arg){
+    make_coroutine(0, routine1, NULL);
+    make_coroutine(0, routine2, NULL);
+}
+
+int
+main(int argc, char **argv){
+    enter_coroutine_environment(co_start, NULL);
+    return 0;
+}
+```
 ## 17. void channel_unlink(char *name);
 - DESCRIPTION  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**channel_unlink()** deletes a channel identified by **name**. If no coroutine opens it, the channel is deleted. If any coroutine still have the channel open, the channel will remain in existence until all coroutines close the channel.
