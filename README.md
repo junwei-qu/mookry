@@ -6,7 +6,7 @@
 This will copy libmookry.so into /usr/lib64 directory and header files into /usr/include/mookry.
 ## 3. Uninstall
 - make uninstall
-## 4. enter_coroutine_environment(void(*routine)(void *), void *arg);  
+## 4. int enter_coroutine_environment(void(*routine)(void *), void *arg);  
 - DESCRIPTION  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**enter_coroutine_environment()** initializes the environment where coroutine executes. The **routine** is invoked after coroutine enviroment initialized and **arg** is passed as the sole argument of **routine()**.<br/>
 - RETURN VALUE  
