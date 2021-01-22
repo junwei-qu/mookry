@@ -6,11 +6,11 @@ void start_routine(void *arg){
 }
 
 void routine(void *arg){
-    make_coroutine(0, start_routine, NULL);
+    co_make(0, start_routine, NULL);
 }
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(routine, NULL);
+    co_env(routine, NULL);
     return 0;
 }

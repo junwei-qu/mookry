@@ -15,12 +15,12 @@ void routine2(void *arg){
 }
 
 void co_start(void *arg){
-    make_coroutine(0, routine1, NULL);
-    make_coroutine(0, routine2, NULL);
+    co_make(0, routine1, NULL);
+    co_make(0, routine2, NULL);
 }
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(co_start, NULL);
+    co_env(co_start, NULL);
     return 0;
 }

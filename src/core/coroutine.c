@@ -81,8 +81,8 @@ static inline void preempt_coroutine();
 static inline void enable_preempt_interrupt();
 static inline void disable_preempt_interrupt();
 
-int enter_coroutine_environment(void (*co_start)(void *), void *arg);
-int make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
+int co_env(void (*co_start)(void *), void *arg);
+int co_make(uint32_t stack_size, void(*routine)(void *), void *arg);
 ssize_t co_write(int sockfd, const void *buf, size_t count, double timeout);
 ssize_t co_send(int sockfd, const void *buf, size_t len, int flags, double timeout);
 ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, double timeout);
@@ -236,7 +236,7 @@ static inline void co_signal_callback(void *arg) {
 }
 
 static inline void signal_callback(struct event_loop *ev, int singo, void *arg){
-    make_coroutine(0, co_signal_callback, arg);
+    co_make(0, co_signal_callback, arg);
 }
 
 static inline uint32_t channel_name_hash(char *name, int len){
@@ -271,7 +271,7 @@ static struct waiting_node *find_waiting_node(int64_t channel_id, int create){
     return find_node;
 }
 
-int enter_coroutine_environment(void (*co_start)(void *), void *arg){
+int co_env(void (*co_start)(void *), void *arg){
     assert(!main_event_loop);
     int ret = 0;
     struct coroutine *cur, *next;
@@ -298,7 +298,7 @@ int enter_coroutine_environment(void (*co_start)(void *), void *arg){
     itimerval.it_value.tv_usec = 10000;
     setitimer(ITIMER_PROF, &itimerval, NULL);
 
-    make_coroutine(0, co_start, arg);
+    co_make(0, co_start, arg);
     while((!sigisemptyset(&signal_set) || coroutine_count) && ret >= 0){
         while(!list_empty(&ready_co_head)){
            list_for_each_entry_safe(cur, next, &ready_co_head, list_node) {
@@ -325,7 +325,7 @@ int enter_coroutine_environment(void (*co_start)(void *), void *arg){
     return ret;
 }
 
-int make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg){
+int co_make(uint32_t stack_size, void(*routine)(void *), void *arg){
     int page_size = sysconf(_SC_PAGE_SIZE);
     if(!stack_size){
         stack_size = DEFAULT_COROUTINE_STACK_SIZE;

@@ -7,6 +7,6 @@ void routine(void *arg){
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(routine, NULL);
+    co_env(routine, NULL);
     return 0;
 }

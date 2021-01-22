@@ -34,6 +34,6 @@ void co_start(void *arg){
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(co_start, NULL);
+    co_env(co_start, NULL);
     return 0;
 }

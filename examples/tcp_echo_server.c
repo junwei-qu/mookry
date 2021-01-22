@@ -41,7 +41,7 @@ void co_start(void *arg){
     while(1){
         long sockfd = co_accept4(fd, NULL, NULL, SOCK_NONBLOCK);
 	if(sockfd > 0){
-            make_coroutine(0, reader_writer, (void *)sockfd);
+            co_make(0, reader_writer, (void *)sockfd);
 	} else {
             perror("accept error");
 	}
@@ -50,6 +50,6 @@ void co_start(void *arg){
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(co_start, NULL);
+    co_env(co_start, NULL);
     return 0;
 }

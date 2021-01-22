@@ -6,11 +6,11 @@
 This will copy libmookry.so into /usr/lib64 directory and header files into /usr/include/mookry.
 ## 3. Uninstall
 - make uninstall
-## 4. int enter_coroutine_environment(void(*routine)(void *), void *arg);  
+## 4. int co_env(void(*routine)(void *), void *arg);  
 - DESCRIPTION  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**enter_coroutine_environment()** initializes the environment where coroutine executes. The **routine** is invoked after coroutine enviroment initialized and **arg** is passed as the sole argument of **routine()**.<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_env()** initializes the environment where coroutine executes. The **routine** is invoked after coroutine enviroment initialized and **arg** is passed as the sole argument of **routine()**.<br/>
 - RETURN VALUE  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, **enter_coroutine_environment()** returns 0; On error, -1 is returned and errno is set appropriately.<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, **co_env()** returns 0; On error, -1 is returned and errno is set appropriately.<br/>
 - EXAMPLES
 ```
 #include <stdio.h>
@@ -22,15 +22,15 @@ void routine(void *arg){
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(routine, NULL);
+    co_env(routine, NULL);
     return 0;
 }
 ```
-## 5. void make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);  
+## 5. void co_make(uint32_t stack_size, void(*routine)(void *), void *arg);  
 - DESCRIPTION  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**make_coroutine()** creates a coroutine whose stack size is **stack_size**. If **stack_size** is 0, the default size 2M is alloced. The new coroutine starts execution by  invoking **routine(); arg** is passed as the sole argument of **routine()**.<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**co_make()** creates a coroutine whose stack size is **stack_size**. If **stack_size** is 0, the default size 2M is alloced. The new coroutine starts execution by  invoking **routine(); arg** is passed as the sole argument of **routine()**.<br/>
 - RETURN VALUE  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, **make_coroutine()** return 0; On error, -1 is returned and errno is set appropriately.<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;On success, **co_make()** return 0; On error, -1 is returned and errno is set appropriately.<br/>
 - ERRORS  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**ENOMEM** No memory is available.<br/>
 - EXAMPLES
@@ -43,12 +43,12 @@ void start_routine(void *arg){
 }
 
 void routine(void *arg){
-    make_coroutine(0, start_routine, NULL);
+    co_make(0, start_routine, NULL);
 }
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(routine, NULL);
+    co_env(routine, NULL);
     return 0;
 }
 ```
@@ -122,7 +122,7 @@ void co_start(void *arg){
     while(1){
         long sockfd = co_accept4(fd, NULL, NULL, SOCK_NONBLOCK);
         if(sockfd > 0){
-            make_coroutine(0, reader_writer, (void *)sockfd);
+            co_make(0, reader_writer, (void *)sockfd);
         } else {
             perror("accept error");
         }
@@ -131,7 +131,7 @@ void co_start(void *arg){
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(co_start, NULL);
+    co_env(co_start, NULL);
     return 0;
 }
 ```
@@ -159,13 +159,13 @@ void routine2(void *arg){
 }
 
 void co_start(void *arg){
-    make_coroutine(0, routine1, NULL);
-    make_coroutine(0, routine2, NULL);
+    co_make(0, routine1, NULL);
+    co_make(0, routine2, NULL);
 }
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(co_start, NULL);
+    co_env(co_start, NULL);
     return 0;
 }
 ```
@@ -209,13 +209,13 @@ void routine2(void *arg){
 }
 
 void co_start(void *arg){
-    make_coroutine(0, routine1, NULL);
-    make_coroutine(0, routine2, NULL);
+    co_make(0, routine1, NULL);
+    co_make(0, routine2, NULL);
 }
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(co_start, NULL);
+    co_env(co_start, NULL);
     return 0;
 }
 ```
@@ -273,7 +273,7 @@ void co_start(void *arg){
 
 int
 main(int argc, char **argv){
-    enter_coroutine_environment(co_start, NULL);
+    co_env(co_start, NULL);
     return 0;
 }
 ```

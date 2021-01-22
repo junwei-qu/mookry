@@ -7,8 +7,8 @@
 
 #define DEFAULT_COROUTINE_STACK_SIZE 2 * 1024 * 1024
 
-int enter_coroutine_environment(void (*co_start)(void *), void *arg);
-int make_coroutine(uint32_t stack_size, void(*routine)(void *), void *arg);
+int co_env(void (*co_start)(void *), void *arg);
+int co_make(uint32_t stack_size, void(*routine)(void *), void *arg);
 ssize_t co_write(int sockfd, const void *buf, size_t count, double timeout);
 ssize_t co_send(int sockfd, const void *buf, size_t len, int flags, double timeout);
 ssize_t co_sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, double timeout);
